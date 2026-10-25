@@ -1,0 +1,15 @@
+{
+  "brand_name": "Acme Enterprise",
+  "primary_teal": "#0F766E",
+  "interactive_teal": "#0D9488",
+  "dark_teal": "#134E4A",
+  "charcoal": "#111827",
+  "warm_neutral": "#F8F9FA",
+  "white": "#FFFFFF",
+  "subtle_border": "#E5E7EB",
+  "prohibited_colors": [
+    "#FF00FF",
+    "#00FF00",
+    "#FFFF00"
+  ]
+}
