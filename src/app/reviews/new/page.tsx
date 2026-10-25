@@ -93,12 +93,12 @@ export default function NewReviewPage() {
 
   // Client-side helper to ensure large creatives fit seamlessly within Vercel serverless request limits
   async function prepareUploadFile(file: File): Promise<File> {
-    if (file.size <= 4 * 1024 * 1024 || file.type === 'image/svg+xml' || typeof window === 'undefined') {
+    if (file.size <= 2 * 1024 * 1024 || file.type === 'image/svg+xml' || typeof window === 'undefined') {
       return file;
     }
     try {
       const bitmap = await createImageBitmap(file);
-      const maxDim = 1920;
+      const maxDim = 1600;
       let w = bitmap.width;
       let h = bitmap.height;
       if (w > maxDim || h > maxDim) {

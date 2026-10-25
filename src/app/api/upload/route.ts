@@ -8,6 +8,8 @@ import crypto from 'crypto';
 const ALLOWED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml'];
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10MB
 
+export const maxDuration = 60;
+
 export async function POST(req: NextRequest) {
   try {
     const formData = await req.formData();

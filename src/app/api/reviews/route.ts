@@ -3,6 +3,8 @@ import { getContentReviews, createContentReview, getDashboardMetrics } from '@/l
 import { CreateReviewPayload } from '@/lib/types';
 import { getServerDbConfigStatus } from '@/lib/supabase/server';
 
+export const maxDuration = 60;
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const status = searchParams.get('status') || undefined;
