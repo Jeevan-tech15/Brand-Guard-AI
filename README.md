@@ -1,5 +1,9 @@
 # BrandGuard AI — Pre-Publication Marketing Governance & Compliance
 
+> 🌐 **Official Live Production URL**: [https://brand-guard-ai-9wao.vercel.app](https://brand-guard-ai-9wao.vercel.app)  
+> 🚀 **Direct Review & Upload Form**: [https://brand-guard-ai-9wao.vercel.app/reviews/new](https://brand-guard-ai-9wao.vercel.app/reviews/new)  
+> 📊 **Review History & Audit Logs**: [https://brand-guard-ai-9wao.vercel.app/reviews](https://brand-guard-ai-9wao.vercel.app/reviews)
+
 An automated, end-to-end multi-modal marketing governance engine designed to audit creative assets against regulatory guidelines, factual claims, and authorized digital assets before publication.
 
 Built for the Hackathon.
