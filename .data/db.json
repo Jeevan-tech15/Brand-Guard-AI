@@ -3457,6 +3457,88 @@
   ],
   "content_reviews": [
     {
+      "id": "4824bcf9-8482-4bd2-bea9-58ce4a30fa0e",
+      "title": "Vercel Deploy Verification Creative Campaign",
+      "content_text": "Acme Enterprise verified uptime SLA with SOC-2 compliance.",
+      "content_type": "social_media",
+      "status": "in_review",
+      "compliance_score": 100,
+      "review_version": 1,
+      "image_url": "https://rlptrwrwzrwuxpwyhdqd.supabase.co/storage/v1/object/public/brandguard-creatives/9af7b594-1385-40b2-860f-bec7e4342833.png",
+      "original_image_url": "https://rlptrwrwzrwuxpwyhdqd.supabase.co/storage/v1/object/public/brandguard-creatives/9af7b594-1385-40b2-860f-bec7e4342833.png",
+      "caption_text": "Acme Enterprise verified uptime SLA with SOC-2 compliance.",
+      "original_caption_text": "Acme Enterprise verified uptime SLA with SOC-2 compliance.",
+      "aspect_ratio": "1:1 (Square)",
+      "image_width": 1080,
+      "image_height": 1080,
+      "extracted_ocr_text": "ACME ENTERPRISE\nCLOUD INFRASTRUCTURE\nEngineered for\nEnterprise Reliability\nAPPROVED FACTUAL BENCHMARK\n\"Documented 99.9% Uptime SLA with Multi-Region High Availability\"\nSOC-2 Type Il and ISO 27001 verified security frameworks\nMulti-layered defense model designed to mitigate attack surfaces\nAutomated failover architecture built for mission-critical uptime\nSLA metrics reflect documented historical enterprise baseline. Results may vary by customer deployment\nAl registered trademarks and partner integration are property of their respective owners. © 2026 Acme Enterprise\nENTERPRISE CLOUD\nv SOC-2 Type Il and ISO 27001 verified security frameworks\nv Multi-layered defense model designed to mitigate attack surfaces\nv Automated failover architecture built for mission-critical uptime\nAsn\n20 Ave Lisp",
+      "created_at": "2026-10-25T05:41:54.628Z",
+      "updated_at": "2026-10-25T05:42:00.460Z",
+      "findings": [],
+      "decisions": [],
+      "evaluation_metadata": {
+        "evaluatedAt": "2026-10-25T05:42:00.460Z",
+        "aiRun": false,
+        "ocrProvider": "Tesseract.js OCR (Local Engine)",
+        "visionModelUsed": "tesseract-wasm",
+        "ocrConfidence": 85.3,
+        "ocrWordsCount": 105,
+        "ocrLinesCount": 17,
+        "unreadableSegmentsCount": 6,
+        "limitationsDisclosed": "Creative visual typography extracted via local OCR engine (Tesseract.js).; Local OCR typography analysis and deterministic rules engine active.; Rule types deferred to human review: color_palette, aspect_ratio; Governance review executed using local deterministic checks, OCR analysis, and factual registry.",
+        "disclosures": [
+          "Creative visual typography extracted via local OCR engine (Tesseract.js).",
+          "Local OCR typography analysis and deterministic rules engine active.",
+          "Rule types deferred to human review: color_palette, aspect_ratio",
+          "Governance review executed using local deterministic checks, OCR analysis, and factual registry."
+        ],
+        "imageSummary": {
+          "width": 1080,
+          "height": 1080,
+          "aspectRatio": "1:1 (Square)",
+          "format": "PNG",
+          "dominantColor": "#084848",
+          "hasLegibleTypography": true,
+          "textLineCount": 17
+        },
+        "modality": "multimodal",
+        "guidelinesEvaluatedCount": 131,
+        "factsEvaluatedCount": 56,
+        "scoringBreakdown": {
+          "baseScore": 100,
+          "totalDeductions": 0,
+          "finalScore": 100,
+          "deductionsBySeverity": {
+            "critical": 0,
+            "high": 0,
+            "medium": 0,
+            "low": 0
+          },
+          "deductions": [],
+          "methodology": "Deterministic scoring begins at 100 baseline points. Documented deductions are assessed per distinct finding: Critical (-25), High (-15), Medium (-8), Low (-3). Critical contradictions cap maximum score at 50%. Overlapping findings targeting identical text snippets are deduplicated to ensure reproducible evaluation.",
+          "disclaimer": "Rule-based compliance score calculated from active brand guidelines and verified factual claims. This metric is an automated governance aid and does not constitute a legal, regulatory, or commercial guarantee.",
+          "isPartialAnalysis": false
+        },
+        "extracted_ocr_text": "ACME ENTERPRISE\nCLOUD INFRASTRUCTURE\nEngineered for\nEnterprise Reliability\nAPPROVED FACTUAL BENCHMARK\n\"Documented 99.9% Uptime SLA with Multi-Region High Availability\"\nSOC-2 Type Il and ISO 27001 verified security frameworks\nMulti-layered defense model designed to mitigate attack surfaces\nAutomated failover architecture built for mission-critical uptime\nSLA metrics reflect documented historical enterprise baseline. Results may vary by customer deployment\nAl registered trademarks and partner integration are property of their respective owners. © 2026 Acme Enterprise\nENTERPRISE CLOUD\nv SOC-2 Type Il and ISO 27001 verified security frameworks\nv Multi-layered defense model designed to mitigate attack surfaces\nv Automated failover architecture built for mission-critical uptime\nAsn\n20 Ave Lisp",
+        "checksCompleted": {
+          "imageAnalysis": true,
+          "captionAnalysis": true,
+          "crossModalComparison": true,
+          "guidelineChecks": true,
+          "factChecks": true
+        },
+        "checksStatus": {
+          "imageInspection": "passed",
+          "typographyExtraction": "passed",
+          "crossModal": "passed",
+          "brandGuidelines": "passed",
+          "factVerification": "passed",
+          "cloudVision": "unavailable"
+        },
+        "isPartialAnalysis": false
+      }
+    },
+    {
       "id": "c7160dd6-ca23-4a23-b90d-30ade118cccd",
       "title": "Vercel Deploy Verification Creative Campaign",
       "content_text": "Acme Enterprise verified uptime SLA with SOC-2 compliance.",

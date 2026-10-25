@@ -50,6 +50,22 @@ export async function POST(req: NextRequest) {
     const height = dimensions?.height || 1080;
     const aspectRatio = classifyAspectRatio(width, height);
 
+    let uploadBuffer = buffer;
+    if (buffer.length > 2 * 1024 * 1024 && file.type !== 'image/svg+xml') {
+      try {
+        const sharp = (await import('sharp')).default;
+        const optimized = await sharp(buffer)
+          .resize({ width: 1600, height: 1600, fit: 'inside', withoutEnlargement: true })
+          .png({ quality: 80, compressionLevel: 8 })
+          .toBuffer();
+        if (optimized.length < buffer.length) {
+          uploadBuffer = optimized;
+        }
+      } catch {
+        // Fallback to original buffer
+      }
+    }
+
     // 4. Generate Safe Filename
     const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
     const safeName = `${crypto.randomUUID()}.${ext}`;
@@ -66,7 +82,7 @@ export async function POST(req: NextRequest) {
       try {
         const uploadPromise = supabase.storage
           .from(bucketName)
-          .upload(safeName, buffer, {
+          .upload(safeName, uploadBuffer, {
             contentType: file.type,
             upsert: true,
           });
@@ -97,7 +113,7 @@ export async function POST(req: NextRequest) {
         fs.mkdirSync(targetDir, { recursive: true });
       }
       const filePath = path.join(targetDir, safeName);
-      fs.writeFileSync(filePath, buffer);
+      fs.writeFileSync(filePath, uploadBuffer);
       localSaved = true;
 
       // If cloud upload was not performed or failed, use the verified local path
@@ -110,7 +126,7 @@ export async function POST(req: NextRequest) {
 
     // 7. Inline Data URL Fallback: If both cloud storage and local disk are unavailable, use inline data URL
     if (!publicUrl) {
-      publicUrl = `data:${file.type};base64,${buffer.toString('base64')}`;
+      publicUrl = `data:${file.type};base64,${uploadBuffer.toString('base64')}`;
     }
 
     return NextResponse.json({

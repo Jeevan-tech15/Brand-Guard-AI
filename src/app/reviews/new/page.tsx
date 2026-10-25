@@ -161,9 +161,19 @@ export default function NewReviewPage() {
       });
 
       clearTimeout(timeoutId);
-      const data = await res.json().catch(() => null);
+      const rawText = await res.text();
+      let data: { url?: string; fileName?: string; width?: number; height?: number; aspect_ratio?: any; sizeBytes?: number; mimeType?: string; error?: string } | null = null;
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        // Non-JSON response
+      }
+
       if (!res.ok) {
-        throw new Error(data?.error || `Upload failed (HTTP ${res.status}).`);
+        if (res.status === 413 || rawText.includes('Request Entity Too Large') || rawText.includes('Payload Too Large')) {
+          throw new Error('Creative file exceeds server upload limit (4.5MB). Please upload a smaller image.');
+        }
+        throw new Error(data?.error || rawText || `Upload failed (HTTP ${res.status}).`);
       }
       if (!data?.url) {
         throw new Error('Upload completed but did not return a valid image URL.');
@@ -172,9 +182,9 @@ export default function NewReviewPage() {
       setUploadedImage({
         url: data.url,
         fileName: data.fileName || rawFile.name,
-        width: data.width,
-        height: data.height,
-        aspect_ratio: data.aspect_ratio,
+        width: data.width || 1080,
+        height: data.height || 1080,
+        aspect_ratio: data.aspect_ratio || '1:1',
         sizeBytes: data.sizeBytes || file.size,
         mimeType: data.mimeType || file.type,
       });
@@ -381,9 +391,26 @@ export default function NewReviewPage() {
       });
 
       clearTimeout(timeoutId);
-      const data = await res.json();
+      const rawText = await res.text();
+      let data: { review?: { id: string }; error?: string } | null = null;
+      try {
+        data = JSON.parse(rawText);
+      } catch {
+        // Response was not JSON (e.g. plain text 413 Request Entity Too Large or 504 Gateway Timeout)
+      }
+
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to submit review.');
+        if (res.status === 413 || rawText.includes('Request Entity Too Large') || rawText.includes('Payload Too Large')) {
+          throw new Error('Creative payload exceeds cloud server size limits (4.5MB). Please upload a smaller or compressed creative.');
+        }
+        if (res.status === 504 || rawText.includes('Gateway Timeout')) {
+          throw new Error('Review analysis timed out on the cloud server. Please try submitting again with a lighter creative.');
+        }
+        throw new Error(data?.error || rawText || `Submission failed (HTTP ${res.status}).`);
+      }
+
+      if (!data?.review?.id) {
+        throw new Error('Audit completed but no review record was returned.');
       }
 
       setSubmitStage('Audit complete! Opening review details...');
