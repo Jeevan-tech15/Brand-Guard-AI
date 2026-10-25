@@ -91,18 +91,55 @@ export default function NewReviewPage() {
     };
   }, []);
 
+  // Client-side helper to ensure large creatives fit seamlessly within Vercel serverless request limits
+  async function prepareUploadFile(file: File): Promise<File> {
+    if (file.size <= 4 * 1024 * 1024 || file.type === 'image/svg+xml' || typeof window === 'undefined') {
+      return file;
+    }
+    try {
+      const bitmap = await createImageBitmap(file);
+      const maxDim = 1920;
+      let w = bitmap.width;
+      let h = bitmap.height;
+      if (w > maxDim || h > maxDim) {
+        if (w > h) {
+          h = Math.round((h * maxDim) / w);
+          w = maxDim;
+        } else {
+          w = Math.round((w * maxDim) / h);
+          h = maxDim;
+        }
+      }
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(bitmap, 0, 0, w, h);
+        const mime = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+        const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, mime, 0.9));
+        if (blob && blob.size < file.size) {
+          return new File([blob], file.name, { type: blob.type });
+        }
+      }
+    } catch {
+      // Fallback to original file if client image processing is unavailable
+    }
+    return file;
+  }
+
   // File Upload Handler
-  async function handleFileUpload(file: File) {
+  async function handleFileUpload(rawFile: File) {
     setErrorMsg(null);
 
     // Client-side pre-validation
     const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml'];
-    if (!validTypes.includes(file.type)) {
-      setErrorMsg(`Invalid file type "${file.type}". Please upload PNG, JPG, JPEG, or WebP.`);
+    if (!validTypes.includes(rawFile.type)) {
+      setErrorMsg(`Invalid file type "${rawFile.type}". Please upload PNG, JPG, JPEG, or WebP.`);
       return;
     }
-    if (file.size > 10 * 1024 * 1024) {
-      setErrorMsg(`Image size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds 10MB limit.`);
+    if (rawFile.size > 15 * 1024 * 1024) {
+      setErrorMsg(`Image size (${(rawFile.size / (1024 * 1024)).toFixed(1)}MB) exceeds 15MB limit.`);
       return;
     }
 
@@ -112,6 +149,7 @@ export default function NewReviewPage() {
     const timeoutId = setTimeout(() => controller.abort(), 60000);
 
     try {
+      const file = await prepareUploadFile(rawFile);
       const formData = new FormData();
       formData.append('file', file);
       formData.append('category', 'creatives');
@@ -123,30 +161,33 @@ export default function NewReviewPage() {
       });
 
       clearTimeout(timeoutId);
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
       if (!res.ok) {
-        throw new Error(data.error || 'Failed to upload image file.');
+        throw new Error(data?.error || `Upload failed (HTTP ${res.status}).`);
+      }
+      if (!data?.url) {
+        throw new Error('Upload completed but did not return a valid image URL.');
       }
 
       setUploadedImage({
         url: data.url,
-        fileName: data.fileName,
+        fileName: data.fileName || rawFile.name,
         width: data.width,
         height: data.height,
         aspect_ratio: data.aspect_ratio,
-        sizeBytes: data.sizeBytes,
-        mimeType: data.mimeType,
+        sizeBytes: data.sizeBytes || file.size,
+        mimeType: data.mimeType || file.type,
       });
 
       // Auto-populate title if empty
       if (!title.trim()) {
-        const cleanName = file.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
+        const cleanName = rawFile.name.replace(/\.[^/.]+$/, '').replace(/[-_]/g, ' ');
         setTitle(`${cleanName.charAt(0).toUpperCase() + cleanName.slice(1)} Campaign Post`);
       }
     } catch (err: unknown) {
       clearTimeout(timeoutId);
       if (err instanceof Error && err.name === 'AbortError') {
-        setErrorMsg('Upload timed out. Please verify your connection and try again.');
+        setErrorMsg('Upload timed out. Please verify your connection or try a smaller creative image.');
       } else {
         setErrorMsg(err instanceof Error ? err.message : 'Error uploading creative.');
       }

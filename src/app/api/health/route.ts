@@ -9,6 +9,12 @@ export async function GET() {
   let databaseLatencyMs: number | undefined;
   let dbError: string | null = null;
 
+  let storageStatus = {
+    creativesBucketReachable: false,
+    assetsBucketReachable: false,
+    serviceRoleActive: Boolean(configStatus.hasServiceKey),
+  };
+
   if (configStatus.isConfigured) {
     const supabase = getSupabaseServerClient();
     if (supabase) {
@@ -19,6 +25,12 @@ export async function GET() {
           isDatabaseReachable = true;
         } else {
           dbError = error.message;
+        }
+
+        const { data: buckets } = await supabase.storage.listBuckets();
+        if (buckets) {
+          storageStatus.creativesBucketReachable = buckets.some((b) => b.name === 'brandguard-creatives');
+          storageStatus.assetsBucketReachable = buckets.some((b) => b.name === 'brand-assets');
         }
       } catch (err: unknown) {
         dbError = err instanceof Error ? err.message : 'Database ping failed';
@@ -34,6 +46,7 @@ export async function GET() {
       latencyMs: databaseLatencyMs,
       missingVars: configStatus.missingVars,
       mode: configStatus.isConfigured ? 'Audit Data Storage' : 'Local Persistent Storage',
+      storage: storageStatus,
       error: dbError,
     },
     llmEngine: {

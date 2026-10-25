@@ -54,25 +54,16 @@ export async function POST(req: NextRequest) {
     const ext = file.name.split('.').pop()?.toLowerCase() || 'png';
     const safeName = `${crypto.randomUUID()}.${ext}`;
 
-    // 5. Always persist to local disk FIRST immediately (guaranteed instant, zero network dependency)
     const uploadSubdir = assetCategory === 'brand_assets' ? 'assets' : 'creatives';
-    const targetDir = path.join(process.cwd(), 'public', 'uploads', uploadSubdir);
-
-    if (!fs.existsSync(targetDir)) {
-      fs.mkdirSync(targetDir, { recursive: true });
-    }
-
-    const filePath = path.join(targetDir, safeName);
-    fs.writeFileSync(filePath, buffer);
-
-    let publicUrl = `/uploads/${uploadSubdir}/${safeName}`;
+    let publicUrl = '';
     let uploadedToCloud = false;
+    let localSaved = false;
 
-    // 6. Supabase Storage: Race with 2.5s timeout so cloud latency never blocks or aborts uploads
+    // 5. Cloud Storage: Upload to Supabase Storage if configured
     const supabase = getSupabaseServerClient();
     if (supabase) {
+      const bucketName = assetCategory === 'brand_assets' ? 'brand-assets' : 'brandguard-creatives';
       try {
-        const bucketName = assetCategory === 'brand_assets' ? 'brand-assets' : 'brandguard-creatives';
         const uploadPromise = supabase.storage
           .from(bucketName)
           .upload(safeName, buffer, {
@@ -80,26 +71,46 @@ export async function POST(req: NextRequest) {
             upsert: true,
           });
 
-        const timeoutPromise = new Promise<{ data: null; error: Error }>((resolve) =>
-          setTimeout(() => resolve({ data: null, error: new Error('Supabase storage upload timeout') }), 2500)
+        const timeoutPromise = new Promise<{ data: null; error: { message: string } }>((resolve) =>
+          setTimeout(() => resolve({ data: null, error: { message: 'Supabase storage upload timeout (10s)' } }), 10000)
         );
 
         const uploadResult = await Promise.race([uploadPromise, timeoutPromise]);
-        if (!uploadResult.error) {
-          const { data } = supabase.storage.from(bucketName).getPublicUrl(safeName);
-          if (data?.publicUrl) {
-            publicUrl = data.publicUrl;
+        if (uploadResult.error) {
+          console.warn(`Supabase Storage upload to bucket "${bucketName}" notice:`, uploadResult.error.message);
+        } else if (uploadResult.data) {
+          const { data: publicData } = supabase.storage.from(bucketName).getPublicUrl(safeName);
+          if (publicData?.publicUrl) {
+            publicUrl = publicData.publicUrl;
             uploadedToCloud = true;
           }
-        } else {
-          // Let the upload proceed in the background without blocking the client response
-          uploadPromise.catch((err) =>
-            console.warn('Background Supabase storage upload notice:', err)
-          );
         }
-      } catch (err) {
-        console.warn('Supabase storage upload skipped or failed, using local persistent URL:', err);
+      } catch (storageErr) {
+        console.warn('Supabase storage upload exception:', storageErr instanceof Error ? storageErr.message : storageErr);
       }
+    }
+
+    // 6. Local Storage: Save to local disk if running in writable environment (e.g. local dev)
+    try {
+      const targetDir = path.join(process.cwd(), 'public', 'uploads', uploadSubdir);
+      if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+      }
+      const filePath = path.join(targetDir, safeName);
+      fs.writeFileSync(filePath, buffer);
+      localSaved = true;
+
+      // If cloud upload was not performed or failed, use the verified local path
+      if (!publicUrl) {
+        publicUrl = `/uploads/${uploadSubdir}/${safeName}`;
+      }
+    } catch {
+      // In serverless environments (like Vercel read-only filesystem), local disk write is safely bypassed
+    }
+
+    // 7. Inline Data URL Fallback: If both cloud storage and local disk are unavailable, use inline data URL
+    if (!publicUrl) {
+      publicUrl = `data:${file.type};base64,${buffer.toString('base64')}`;
     }
 
     return NextResponse.json({
@@ -112,14 +123,17 @@ export async function POST(req: NextRequest) {
       aspect_ratio_ratio: aspectRatio.ratio,
       sizeBytes: file.size,
       mimeType: file.type,
-      storage_location: uploadedToCloud ? 'supabase_storage' : 'local_persistent_storage',
+      storage_location: uploadedToCloud
+        ? 'supabase_storage'
+        : localSaved
+          ? 'local_persistent_storage'
+          : 'inline_data_payload',
     });
   } catch (err: unknown) {
-    console.error('Image upload failed:', err);
+    const errorMsg = err instanceof Error ? err.message : 'An unexpected error occurred during image upload.';
+    console.error('Image upload failed:', errorMsg);
     return NextResponse.json(
-      {
-        error: err instanceof Error ? err.message : 'An unexpected error occurred during image upload.',
-      },
+      { error: errorMsg },
       { status: 500 }
     );
   }
