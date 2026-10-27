@@ -31,6 +31,7 @@ export function runDeterministicChecks(
       // -------------------------------------------------------------
       // 1. Prohibited Claims & Terms
       // -------------------------------------------------------------
+      case 'prohibited_phrase':
       case 'prohibited_claim':
       case 'prohibited_term':
       case 'forbidden_words':
@@ -106,11 +107,6 @@ export function runDeterministicChecks(
           });
 
           if (!hasAnyRequiredPhrase) {
-            // Disclaimers primarily govern the post caption copy; skip if inspecting image-only typography unless explicitly configured
-            if (targetScope === 'image' && triggerKeywords.length > 0) {
-              break;
-            }
-
             const expected = requiredPhrases[0];
             findings.push({
               category: 'required_disclaimer',

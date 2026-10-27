@@ -3,6 +3,7 @@ import {
   getApprovedFacts,
   createApprovedFact,
   updateApprovedFact,
+  deleteApprovedFact,
   toggleApprovedFactActive,
 } from '@/lib/db';
 import { CreateFactPayload, UpdateFactPayload } from '@/lib/types';
@@ -75,6 +76,25 @@ export async function PUT(req: NextRequest) {
   } catch (err: unknown) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Failed to update approved fact' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json({ error: 'Fact ID is required.' }, { status: 400 });
+    }
+
+    await deleteApprovedFact(id);
+    return NextResponse.json({ success: true });
+  } catch (err: unknown) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to delete approved fact' },
       { status: 500 }
     );
   }

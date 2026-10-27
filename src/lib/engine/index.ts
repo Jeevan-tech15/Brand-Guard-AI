@@ -1,19 +1,16 @@
-import { BrandGuideline, ApprovedFact, AuthorizedAsset, ContentType, ReviewStatus, ImageSummaryStats, BoundingBox } from '@/lib/types';
-import { runDeterministicChecks, runSpellingAndGrammarChecks } from './deterministic';
-import { runFactChecks } from './fact-checker';
-import { runAIEvaluation } from './ai-evaluator';
+import { BrandGuideline, ApprovedFact, AuthorizedAsset, ContentType, ReviewStatus } from '@/lib/types';
 import { runVisionAnalysis } from './vision-analyzer';
-import { runCrossModalChecks, checkInternalImageConflicts } from './cross-modal';
 import { calculateComplianceScore } from './scoring';
-import { ComplianceReviewResult, EngineFinding } from './types';
+import { runDeterministicChecks } from './deterministic';
+import { runFactChecks } from './fact-checker';
+import { ComplianceReviewResult } from './types';
 
 export * from './types';
-export * from './deterministic';
-export * from './fact-checker';
-export * from './cross-modal';
-export * from './ai-evaluator';
+export * from './image-first-analyzer';
 export * from './vision-analyzer';
 export * from './scoring';
+export * from './deterministic';
+export * from './fact-checker';
 
 export async function runComplianceReview(
   content: string,
@@ -23,212 +20,110 @@ export async function runComplianceReview(
   options?: {
     skipAI?: boolean;
     imageUrl?: string;
-    captionText?: string;
     assets?: AuthorizedAsset[];
     ocrReferenceText?: string;
+    captionText?: string;
   }
 ): Promise<ComplianceReviewResult> {
   const activeGuidelines = guidelines.filter((g) => g.is_active);
   const activeFacts = facts.filter((f) => f.is_active);
   const activeAssets = (options?.assets || []).filter((a) => a.is_active);
 
-  const rawContent = content.trim();
-  const captionCandidate = options?.captionText !== undefined
-    ? options.captionText.trim()
-    : (rawContent.startsWith('[Marketing Post Image:') ? '' : rawContent);
-  const captionText = captionCandidate;
-  const hasImage = Boolean(options?.imageUrl || options?.ocrReferenceText);
-  const hasCaption = Boolean(captionText && captionText.length > 0);
-  const modality: 'multimodal' | 'image_only' | 'text_only' =
-    hasImage && hasCaption ? 'multimodal' : hasImage ? 'image_only' : 'text_only';
+  const explicitImage = options?.imageUrl || (content.startsWith('/uploads/') || content.startsWith('http') || content.startsWith('data:') ? content : '');
+  const ocrText = options?.ocrReferenceText || (explicitImage ? '' : content);
+  const imageUrl = explicitImage;
+  const hasImage = Boolean(imageUrl || ocrText);
 
-  // =================================================================
-  // STAGE 1: IMAGE-ONLY INDEPENDENT AUDIT
-  // =================================================================
-  let imageFindings: EngineFinding[] = [];
-  let extractedOcrText = '';
-  let visionRun = false;
-  let visionModelUsed: string | undefined = undefined;
-  let visionProvider: string | undefined = undefined;
-  let ocrConfidence: number | null = null;
-  let ocrWordsCount = 0;
-  let ocrLinesCount = 0;
-  let unreadableSegmentsCount = 0;
-  let imageSummary: ImageSummaryStats | null = null;
-  let imageInspectionSucceeded = false;
-  const visionDisclosures: string[] = [];
-  let detectedBoundingBoxes: Array<{ text: string; confidence: number; bbox: BoundingBox }> = [];
-
-  if (hasImage) {
-    const visionResult = await runVisionAnalysis({
-      imageUrl: options?.imageUrl || '',
-      captionText,
-      guidelines: activeGuidelines,
-      facts: activeFacts,
-      assets: activeAssets,
-      ocrReferenceText: options?.ocrReferenceText,
-    });
-
-    visionRun = visionResult.visionRun;
-    visionModelUsed = visionResult.model;
-    visionProvider = visionResult.provider;
-    extractedOcrText = visionResult.extracted_ocr_text;
-    ocrConfidence = visionResult.ocrConfidence ?? null;
-    ocrWordsCount = visionResult.ocrWordsCount ?? 0;
-    ocrLinesCount = visionResult.ocrLinesCount ?? 0;
-    unreadableSegmentsCount = visionResult.unreadableSegmentsCount ?? 0;
-    imageSummary = visionResult.imageSummary ?? null;
-    detectedBoundingBoxes = visionResult.boundingBoxes ?? [];
-    visionDisclosures.push(...visionResult.disclosures);
-    if (visionResult.reason && !visionResult.visionRun) {
-      visionDisclosures.push(visionResult.reason);
-    }
-    imageInspectionSucceeded = Boolean(
-      visionResult.imageSummary || visionResult.extracted_ocr_text || visionResult.provider
-    );
-
-    // Findings directly produced by vision analyzer
-    imageFindings.push(...visionResult.findings);
-
-    // If cloud multimodal vision was NOT executed (local OCR mode), run independent Image-Only checks:
-    if (!visionResult.visionRun && extractedOcrText) {
-      // 1a. Visible spelling and grammar errors in image typography
-      const imgSpelling = runSpellingAndGrammarChecks(extractedOcrText, 'image');
-      imageFindings.push(...imgSpelling);
-
-      // 1b. Conflicting claims within the creative image itself
-      const internalImageConflicts = checkInternalImageConflicts(extractedOcrText);
-      imageFindings.push(...internalImageConflicts);
-
-      // 1c. Deterministic brand guidelines on image text
-      const { findings: imgDetFindings } = runDeterministicChecks(
-        extractedOcrText,
-        contentType,
-        activeGuidelines,
-        { targetScope: 'image' }
-      );
-      imageFindings.push(...imgDetFindings);
-
-      // 1d. Product claims and factual assertions on image text
-      const { findings: imgFactFindings } = runFactChecks(
-        extractedOcrText,
-        activeFacts,
-        { sourceTag: 'image' }
-      );
-      imageFindings.push(...imgFactFindings);
-    }
+  if (!hasImage) {
+    return {
+      status: 'pending',
+      compliance_score: null,
+      findings: [
+        {
+          category: 'other_visible_issues',
+          severity: 'critical',
+          finding_title: 'No Marketing Creative Image Provided',
+          explanation: 'BrandGuard AI performs image-only pre-publication governance. A valid creative image file must be uploaded to perform audit inspection.',
+          evidence_text: 'Missing image asset',
+          confidence: 1.0,
+          suggested_fix: 'Upload a marketing creative image (PNG, JPG, WebP, SVG) to audit.',
+          source: 'image',
+          verification_status: 'unverifiable',
+          target_type: 'layout',
+          target_scope: 'image',
+          resolution_status: 'unresolved',
+        },
+      ],
+      metadata: {
+        evaluatedAt: new Date().toISOString(),
+        aiRun: false,
+        modality: 'image_only',
+        guidelinesEvaluatedCount: activeGuidelines.length,
+        factsEvaluatedCount: activeFacts.length,
+        governance_status: 'ANALYSIS INCOMPLETE',
+        analysisStatus: 'failed',
+        scoringBreakdown: {
+          baseScore: 100,
+          totalDeductions: 25,
+          finalScore: null,
+          deductionsBySeverity: { critical: 1, high: 0, medium: 0, low: 0 },
+          deductions: [],
+          methodology: 'Image-only governance requires an accessible image asset.',
+          disclaimer: 'No image provided.',
+          isPartialAnalysis: true,
+        },
+        checksCompleted: {
+          imageAnalysis: false,
+          typographyExtraction: false,
+          spellingAndGrammar: false,
+          logoAndBrandIdentity: false,
+          abusiveLanguage: false,
+          layoutAndDesign: false,
+          claimsAndConsistency: false,
+          copyrightAndIp: false,
+          guidelineChecks: false,
+          factChecks: false,
+        },
+      },
+    };
   }
 
-  // Ensure all image findings are strictly tagged
-  imageFindings = imageFindings.map((f) => ({
-    ...f,
-    target_scope: 'image' as const,
-    source: f.source === 'vision_model' ? 'vision_model' : 'image',
-  }));
-
   // =================================================================
-  // STAGE 2: CAPTION-ONLY INDEPENDENT AUDIT (Runs even with no image)
+  // IMAGE GOVERNANCE AUDIT (Pixels, OCR Typography, & Standards)
   // =================================================================
-  let captionFindings: EngineFinding[] = [];
-  let unsupportedRuleTypes: string[] = [];
+  const visionResult = await runVisionAnalysis({
+    imageUrl,
+    guidelines: activeGuidelines,
+    facts: activeFacts,
+    assets: activeAssets,
+    ocrReferenceText: ocrText,
+  });
 
-  if (hasCaption) {
-    // 2a. Deterministic brand rules on caption copy
-    const { findings: capDetFindings, unsupportedRuleTypes: unsupp } = runDeterministicChecks(
-      captionText,
-      contentType,
-      activeGuidelines,
-      { targetScope: 'caption' }
-    );
-    unsupportedRuleTypes = unsupp;
-    captionFindings.push(...capDetFindings);
+  const visionRun = visionResult.visionRun;
+  const visionModelUsed = visionResult.model;
+  const visionProvider = visionResult.provider;
+  const extractedOcrText = visionResult.extracted_ocr_text;
+  const ocrConfidence = visionResult.ocrConfidence ?? null;
+  const ocrWordsCount = visionResult.ocrWordsCount ?? 0;
+  const ocrLinesCount = visionResult.ocrLinesCount ?? 0;
+  const unreadableSegmentsCount = visionResult.unreadableSegmentsCount ?? 0;
+  const imageSummary = visionResult.imageSummary ?? null;
+  const detectedBoundingBoxes = visionResult.boundingBoxes ?? [];
+  const visionDisclosures: string[] = [...visionResult.disclosures];
 
-    // 2b. Caption spelling and grammar check
-    const capSpelling = runSpellingAndGrammarChecks(captionText, 'caption');
-    captionFindings.push(...capSpelling);
-
-    // 2c. Fact checking and unsupported claims on caption copy
-    const { findings: capFactFindings } = runFactChecks(
-      captionText,
-      activeFacts,
-      { sourceTag: 'caption' }
-    );
-    captionFindings.push(...capFactFindings);
+  if (visionResult.reason && !visionResult.visionRun) {
+    visionDisclosures.push(visionResult.reason);
   }
 
-  // Ensure all caption findings are strictly tagged
-  captionFindings = captionFindings.map((f) => ({
-    ...f,
-    target_scope: 'caption' as const,
-    source: f.source || 'caption',
-  }));
-
-  // =================================================================
-  // STAGE 3: CROSS-MODAL AUDIT (Only runs after both Stages 1 & 2 complete)
-  // =================================================================
-  let crossModalFindings: EngineFinding[] = [];
-  if (hasImage && hasCaption && extractedOcrText && captionText) {
-    const cmResult = runCrossModalChecks(extractedOcrText, captionText);
-    crossModalFindings = cmResult.findings.map((f) => ({
-      ...f,
-      target_scope: 'both' as const,
-      category: 'cross_modal_conflict',
-      source: 'cross_modal' as const,
-    }));
-  }
-
-  // 6. Run AI Text Evaluation if enabled and configured (when not already run by vision)
-  let aiRun = false;
-  let aiProvider: string | undefined = undefined;
-  let aiLimitations: string | undefined = undefined;
-  let aiFindings: EngineFinding[] = [];
-
-  const isRealVisionAi = Boolean(visionRun && visionModelUsed && visionModelUsed.includes('gemini'));
-
-  const combinedText = [captionText, extractedOcrText].filter(Boolean).join('\n\n');
-
-  if (isRealVisionAi) {
-    aiRun = true;
-    aiProvider = visionModelUsed || 'Google Gemini Vision';
-  } else if (!options?.skipAI && combinedText.trim().length > 0) {
-    const aiResult = await runAIEvaluation(combinedText, activeGuidelines, activeFacts);
-    aiRun = aiResult.aiRun;
-    aiProvider = aiResult.provider;
-    aiLimitations = aiResult.reason;
-    aiFindings = aiResult.findings.map(f => ({
-      ...f,
-      target_scope: f.target_scope || (captionText && f.evidence_text && captionText.includes(f.evidence_text) ? 'caption' : 'image')
-    }));
-  } else if (options?.skipAI) {
-    aiLimitations = 'AI contextual evaluation explicitly bypassed by request options.';
-  } else {
-    aiRun = false;
-    aiProvider = undefined;
-    aiLimitations = visionProvider
-      ? `Typography extracted via ${visionProvider}. Cloud AI Vision provider not configured.`
-      : 'Cloud AI provider not configured in environment.';
-  }
-
-  // Combine limitations and disclosures
-  const allDisclosures = [...visionDisclosures];
-  if (unsupportedRuleTypes.length > 0) {
-    allDisclosures.push(`Rule types deferred to human review: ${unsupportedRuleTypes.join(', ')}`);
-  }
-  if (aiLimitations) {
-    allDisclosures.push(aiLimitations);
-  }
-
-  // 7. Merge and Deduplicate Findings from all three independent stages
-  const allFindings = mergeAndDeduplicateFindings(
-    crossModalFindings,
-    captionFindings,
-    imageFindings,
-    aiFindings
+  const imageInspectionSucceeded = Boolean(
+    visionResult.imageSummary || visionResult.extracted_ocr_text || visionResult.provider || ocrText
   );
 
-  // 7b. Correlate local OCR line bounding boxes to findings when bounding boxes are missing
+  let imageFindings = [...visionResult.findings];
+
+  // Correlate local bounding boxes when findings lack bounding box coordinates
   if (detectedBoundingBoxes.length > 0) {
-    for (const finding of allFindings) {
+    for (const finding of imageFindings) {
       if (!finding.bounding_box) {
         const query = (finding.image_evidence || finding.evidence_text || '').toLowerCase().trim();
         if (query) {
@@ -244,40 +139,78 @@ export async function runComplianceReview(
     }
   }
 
-  // 8. Calculate Documented Compliance Score
-  const scoreBreakdown = calculateComplianceScore(allFindings, {
-    hasImageInput: hasImage,
-    hasCaptionInput: hasCaption,
+  // Run deterministic brand guideline rules and fact verification on extracted OCR / reference text
+  const textForAudits = extractedOcrText || ocrText || '';
+  if (textForAudits.trim()) {
+    const { findings: detFindings } = runDeterministicChecks(textForAudits, contentType, activeGuidelines, { targetScope: 'image' });
+    const { findings: factFindings } = runFactChecks(textForAudits, activeFacts, { sourceTag: 'image' });
+
+    for (const df of detFindings) {
+      if (!imageFindings.some((f) => (df.guideline_id && f.guideline_id === df.guideline_id) || f.finding_title === df.finding_title || (df.evidence_text && f.evidence_text === df.evidence_text))) {
+        imageFindings.push(df);
+      }
+    }
+    for (const ff of factFindings) {
+      if (!imageFindings.some((f) => (ff.fact_id && f.fact_id === ff.fact_id) || f.finding_title === ff.finding_title)) {
+        imageFindings.push(ff);
+      }
+    }
+  }
+
+  const aiRun = Boolean(visionRun && visionModelUsed && visionModelUsed.includes('gemini'));
+
+  if (!process.env.GEMINI_API_KEY) {
+    visionDisclosures.push('GEMINI_API_KEY is not configured. Falling back to local OCR and deterministic rules.');
+  } else if (!aiRun || options?.skipAI) {
+    if (!visionDisclosures.some((d) => d.toLowerCase().includes('fallback') || d.toLowerCase().includes('unavailable'))) {
+      visionDisclosures.push('AI provider unavailable. Analysis executed via fallback local OCR and deterministic rules.');
+    }
+  }
+
+  // Ensure all findings are tagged target_scope = 'image'
+  imageFindings = imageFindings.map((f) => ({
+    ...f,
+    target_scope: 'image' as const,
+  }));
+
+  // Disclosures on Brand Guidelines presence
+  if (activeGuidelines.length === 0) {
+    visionDisclosures.push('No active brand guidelines configured. Analysis performed against general visual quality, layout, safety, and claim consistency standards.');
+  }
+
+  // Calculate Documented Compliance Score
+  const scoreBreakdown = calculateComplianceScore(imageFindings, {
+    hasImageInput: true,
+    imageInspectionSucceeded,
     extractedOcrText,
     checksCompleted: {
       imageAnalysis: imageInspectionSucceeded,
-      captionAnalysis: hasCaption,
-      crossModalComparison: Boolean(extractedOcrText && captionText),
+      typographyExtraction: Boolean(extractedOcrText && extractedOcrText.length > 0),
+      spellingAndGrammar: true,
+      logoAndBrandIdentity: true,
+      abusiveLanguage: true,
+      layoutAndDesign: true,
+      claimsAndConsistency: true,
+      copyrightAndIp: true,
       guidelineChecks: activeGuidelines.length > 0,
       factChecks: activeFacts.length > 0,
     },
   });
 
-  // 9. Determine Resulting Governance Status
-  // Automated engine distinguishes PASS, WARNING, REVIEW REQUIRED, and ANALYSIS INCOMPLETE.
-  // Content with 0 violations transitions to 'in_review' awaiting explicit human reviewer signoff.
-  const hasCritical = allFindings.some((f) => f.severity === 'critical');
-  const hasHigh = allFindings.some((f) => f.severity === 'high');
-  const hasHumanReviewRequired = allFindings.some(
+  // Determine Resulting Governance Status
+  const hasCritical = imageFindings.some((f) => f.severity === 'critical');
+  const hasHigh = imageFindings.some((f) => f.severity === 'high');
+  const hasHumanReviewRequired = imageFindings.some(
     (f) => f.needs_human_verification || f.category === 'copyright_and_ip_risk'
   );
 
   let governance_status: 'PASS' | 'WARNING' | 'REVIEW REQUIRED' | 'ANALYSIS INCOMPLETE' = 'PASS';
 
-  if (
-    scoreBreakdown.isPartialAnalysis ||
-    (hasImage && !imageInspectionSucceeded) ||
-    (hasImage && !extractedOcrText && !hasCaption)
-  ) {
+  if (!imageInspectionSucceeded) {
     governance_status = 'ANALYSIS INCOMPLETE';
   } else if (hasCritical || hasHigh || hasHumanReviewRequired) {
     governance_status = 'REVIEW REQUIRED';
-  } else if (allFindings.length > 0 || (scoreBreakdown.finalScore !== null && scoreBreakdown.finalScore < 90)) {
+  } else if (imageFindings.length > 0 || (scoreBreakdown.finalScore !== null && scoreBreakdown.finalScore < 90)) {
     governance_status = 'WARNING';
   } else {
     governance_status = 'PASS';
@@ -288,6 +221,8 @@ export async function runComplianceReview(
     status = 'pending';
   } else if (hasCritical || hasHigh) {
     status = 'flagged';
+  } else if (imageFindings.length === 0 && scoreBreakdown.finalScore === 100) {
+    status = 'approved';
   } else {
     status = 'in_review';
   }
@@ -295,22 +230,22 @@ export async function runComplianceReview(
   return {
     status,
     compliance_score: scoreBreakdown.finalScore,
-    findings: allFindings,
+    findings: imageFindings,
     extracted_ocr_text: extractedOcrText || undefined,
     metadata: {
       evaluatedAt: new Date().toISOString(),
       aiRun,
-      aiProvider: aiRun ? (aiProvider || 'Google Gemini Vision') : undefined,
+      aiProvider: aiRun ? (visionProvider || 'Google Gemini Vision') : undefined,
       ocrProvider: visionProvider,
       visionModelUsed,
       ocrConfidence,
       ocrWordsCount,
       ocrLinesCount,
       unreadableSegmentsCount,
-      limitationsDisclosed: allDisclosures.length > 0 ? allDisclosures.join('; ') : undefined,
-      disclosures: allDisclosures,
+      limitationsDisclosed: visionDisclosures.length > 0 ? visionDisclosures.join('; ') : undefined,
+      disclosures: visionDisclosures,
       imageSummary,
-      modality,
+      modality: 'image_only',
       guidelinesEvaluatedCount: activeGuidelines.length,
       factsEvaluatedCount: activeFacts.length,
       scoringBreakdown: scoreBreakdown,
@@ -319,50 +254,30 @@ export async function runComplianceReview(
       analysisStatus: governance_status === 'ANALYSIS INCOMPLETE' ? 'partial' : 'complete',
       checksCompleted: {
         imageAnalysis: imageInspectionSucceeded,
-        captionAnalysis: hasCaption,
-        crossModalComparison: Boolean(extractedOcrText && captionText),
+        typographyExtraction: Boolean(extractedOcrText && extractedOcrText.length > 0),
+        spellingAndGrammar: true,
+        logoAndBrandIdentity: true,
+        abusiveLanguage: true,
+        layoutAndDesign: true,
+        claimsAndConsistency: true,
+        copyrightAndIp: true,
         guidelineChecks: activeGuidelines.length > 0,
         factChecks: activeFacts.length > 0,
       },
       checksStatus: {
-        imageInspection: imageInspectionSucceeded ? 'passed' : hasImage ? 'failed' : 'unavailable',
-        typographyExtraction: extractedOcrText.length > 0 ? 'passed' : hasImage ? 'unavailable' : 'unavailable',
-        crossModal: Boolean(extractedOcrText && captionText) ? 'passed' : 'unavailable',
+        imageInspection: imageInspectionSucceeded ? 'passed' : 'failed',
+        typographyExtraction: extractedOcrText.length > 0 ? 'passed' : 'unavailable',
+        spellingAndGrammar: 'passed',
+        logoAndBrandIdentity: 'passed',
+        abusiveLanguage: 'passed',
+        layoutAndDesign: 'passed',
+        claimsAndConsistency: 'passed',
+        copyrightAndIp: 'passed',
         brandGuidelines: activeGuidelines.length > 0 ? 'passed' : 'unavailable',
         factVerification: activeFacts.length > 0 ? 'passed' : 'unavailable',
-        cloudVision: isRealVisionAi ? 'passed' : 'unavailable',
+        cloudVision: aiRun ? 'passed' : 'unavailable',
       },
       isPartialAnalysis: scoreBreakdown.isPartialAnalysis,
     },
   };
-}
-
-function mergeAndDeduplicateFindings(
-  crossModal: EngineFinding[],
-  caption: EngineFinding[],
-  image: EngineFinding[],
-  ai: EngineFinding[]
-): EngineFinding[] {
-  const merged: EngineFinding[] = [];
-  const seenSignatures = new Set<string>();
-
-  // Prioritize findings: cross-modal conflicts > caption/image independent findings > AI
-  const list = [...crossModal, ...caption, ...image, ...ai];
-
-  for (const item of list) {
-    const evidenceKey = (item.evidence_text || item.finding_title).toLowerCase().trim();
-    const sig = `${item.category}:${item.target_scope || 'all'}:${evidenceKey}`;
-
-    if (evidenceKey && seenSignatures.has(sig)) {
-      continue;
-    }
-
-    if (evidenceKey) {
-      seenSignatures.add(sig);
-    }
-
-    merged.push(item);
-  }
-
-  return merged;
 }

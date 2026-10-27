@@ -3,6 +3,7 @@ import {
   getBrandGuidelines,
   createBrandGuideline,
   updateBrandGuideline,
+  deleteBrandGuideline,
   toggleBrandGuidelineActive,
 } from '@/lib/db';
 import { CreateGuidelinePayload, UpdateGuidelinePayload } from '@/lib/types';
@@ -80,6 +81,25 @@ export async function PUT(req: NextRequest) {
   } catch (err: unknown) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : 'Failed to update guideline' },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE(req: NextRequest) {
+  try {
+    const { searchParams } = new URL(req.url);
+    const id = searchParams.get('id');
+
+    if (!id) {
+      return NextResponse.json({ error: 'Guideline ID is required.' }, { status: 400 });
+    }
+
+    await deleteBrandGuideline(id);
+    return NextResponse.json({ success: true });
+  } catch (err: unknown) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Failed to delete guideline' },
       { status: 500 }
     );
   }

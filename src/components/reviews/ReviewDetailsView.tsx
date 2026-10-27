@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import { Modal } from '@/components/ui/Modal';
 import { ContentReview, ReviewFinding, ReviewDecisionType, AuthorizedAsset } from '@/lib/types';
-import { formatDate, formatContentTypeLabel, getSeverityBadge } from '@/lib/utils';
+import { formatDate, formatContentTypeLabel } from '@/lib/utils';
 import {
   ArrowLeft,
   ShieldCheck,
@@ -20,16 +20,13 @@ import {
   CheckCircle2,
   Wand2,
   Columns,
-  FileText,
   ChevronDown,
   ChevronUp,
   Info,
   Sliders,
   Cpu,
-  Layers,
   Download,
   FileJson,
-  Loader2,
 } from 'lucide-react';
 
 interface ReviewDetailsViewProps {
@@ -37,89 +34,14 @@ interface ReviewDetailsViewProps {
 }
 
 function getTargetAndReplacement(
-  finding?: ReviewFinding | null,
-  captionText?: string | null
-): { target: string; replacement: string; scope: 'caption' | 'image' } {
-  if (!finding) return { target: '', replacement: '', scope: 'caption' };
-
-  const caption = (captionText || '').trim();
-
-  // 1. Direct structured fields if present
-  if (finding.caption_evidence && caption.toLowerCase().includes(finding.caption_evidence.toLowerCase())) {
-    return {
-      target: finding.caption_evidence,
-      replacement: finding.proposed_replacement || finding.image_evidence || '',
-      scope: finding.target_scope === 'image' ? 'image' : 'caption',
-    };
-  }
-
-  // 2. Cross-modal conflict handling
-  if (finding.category === 'cross_modal_conflict') {
-    // Title match: e.g. "Conflicting Cooling Duration (Image: 72h vs Caption: 24h)"
-    const titleMatch = finding.finding_title.match(/Image:\s*([^\s]+)\s*vs\s*Caption:\s*([^\s)]+)/i);
-    if (titleMatch) {
-      const imgVal = titleMatch[1];
-      const capVal = titleMatch[2];
-
-      const capNumMatch = capVal.match(/\d+/);
-      if (capNumMatch) {
-        const num = capNumMatch[0];
-        const capRegex = new RegExp(`\\b${num}\\s*(?:hours?|hrs?|%\\s*off|%|days?|gb|tb|mins?)\\b`, 'i');
-        const hit = caption.match(capRegex);
-        if (hit) {
-          const imgNum = imgVal.match(/\d+/)?.[0] || imgVal;
-          const repl = hit[0].replace(new RegExp(`\\b${num}\\b`), imgNum);
-          return { target: hit[0], replacement: repl, scope: 'caption' };
-        }
-      }
-    }
-
-    // Evidence text quote: Caption claims 24 hours ("Keeps your drinks cold for 24 hours")
-    if (finding.evidence_text) {
-      const capQuote = finding.evidence_text.match(/Caption\s+(?:claims|states|specifies)[^"]*["']([^"']+)["']/i);
-      if (capQuote && caption.toLowerCase().includes(capQuote[1].toLowerCase())) {
-        const imgQuote = finding.evidence_text.match(/Image\s+(?:specifies|states|claims)[^"]*["']([^"']+)["']/i);
-        return {
-          target: capQuote[1],
-          replacement: finding.proposed_replacement || imgQuote?.[1] || '',
-          scope: 'caption',
-        };
-      }
-    }
-  }
-
-  // 3. Prohibited term
-  const termMatch = finding.finding_title.match(/Prohibited Term Detected:\s*["']([^"']+)["']/i);
-  if (termMatch && caption.toLowerCase().includes(termMatch[1].toLowerCase())) {
-    return {
-      target: termMatch[1],
-      replacement: finding.proposed_replacement || '',
-      scope: 'caption',
-    };
-  }
-
-  // 4. Exact evidence_text in caption
-  if (finding.evidence_text && caption.toLowerCase().includes(finding.evidence_text.toLowerCase())) {
-    return {
-      target: finding.evidence_text,
-      replacement: finding.proposed_replacement || '',
-      scope: 'caption',
-    };
-  }
-
-  // 5. Visual element / Bounding box
-  if (finding.target_type === 'visual_element' || finding.bounding_box) {
-    return {
-      target: finding.evidence_text || '',
-      replacement: finding.suggested_fix || '',
-      scope: 'image',
-    };
-  }
+  finding?: ReviewFinding | null
+): { target: string; replacement: string; scope: 'image' } {
+  if (!finding) return { target: '', replacement: '', scope: 'image' };
 
   return {
-    target: finding.caption_evidence || '',
+    target: finding.evidence_text || finding.image_evidence || '',
     replacement: finding.proposed_replacement || finding.suggested_fix || '',
-    scope: 'caption',
+    scope: 'image',
   };
 }
 
@@ -153,7 +75,6 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
   // Correction Studio Modal State (Requirement 4 & 5)
   const [isCorrectionModalOpen, setIsCorrectionModalOpen] = useState(false);
   const [correctionTargetFinding, setCorrectionTargetFinding] = useState<ReviewFinding | null>(null);
-  const [correctionMode, setCorrectionMode] = useState<'caption' | 'image'>('caption');
   const [replaceTargetText, setReplaceTargetText] = useState('');
   const [newReplacementText, setNewReplacementText] = useState('');
   const [selectedReplacementAssetId, setSelectedReplacementAssetId] = useState<string>('');
@@ -161,17 +82,13 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
   const [isApplyingCorrection, setIsApplyingCorrection] = useState(false);
   const [correctionError, setCorrectionError] = useState<string | null>(null);
 
-  // Findings Category Filter State (Matching Results UI 8 Sections)
+  // Findings Category Filter State (Matching 7 Image-First Categories)
   const [findingsCategoryFilter, setFindingsCategoryFilter] = useState<
-    'all' | 'ocr_errors' | 'visual_design' | 'copyright_ip' | 'brand_claims' | 'caption_analysis' | 'cross_modal'
+    'all' | 'spelling_and_text' | 'logo_and_brand' | 'abusive_language' | 'layout_and_design' | 'claims_and_consistency' | 'copyright_trademark_ip' | 'other_visible_issues' | string
   >('all');
 
   // Expandable Diagnostics Accordion State (Requirement 6)
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
-
-  // Download Report & Export States
-  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
-  const [isExportingJson, setIsExportingJson] = useState(false);
 
   const fetchReview = useCallback(async () => {
     if (!id) return;
@@ -280,7 +197,7 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
           ? `Compliance audit finished with partial analysis. Some checks could not run.`
           : findingsCount === 0
           ? `Compliance audit complete: 0 automated violations detected. Awaiting reviewer signoff.`
-          : `Compliance audit complete: Score: ${data.evaluation?.compliance_score ?? 'Updated'}% with ${findingsCount} finding(s) detected across creative image and caption.`
+          : `Compliance audit complete: Score: ${data.evaluation?.compliance_score ?? 'Updated'}% with ${findingsCount} finding(s) detected across creative image.`
       );
     } catch (err: unknown) {
       clearTimeout(timeoutId);
@@ -294,188 +211,132 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
     }
   }
 
-  // Open Correction Studio
+  // Open Creative Revision Studio
   function handleOpenCorrectionStudio(finding?: ReviewFinding) {
     setCorrectionError(null);
     setCorrectionTargetFinding(finding || null);
     setUploadedRevisedFile(null);
-    const { target, replacement, scope } = getTargetAndReplacement(
-      finding,
-      review?.caption_text || review?.content_text
-    );
+    const { target, replacement } = getTargetAndReplacement(finding);
     setReplaceTargetText(target);
     setNewReplacementText(replacement);
-    setCorrectionMode(scope === 'image' ? 'image' : 'caption');
     setIsCorrectionModalOpen(true);
   }
 
-  // Apply Correction and Reanalyze (Requirements 1, 2, 3, 4, 5)
+  // Apply Correction and Reanalyze (Image Graphic Revision)
   async function handleApplyCorrection(e: React.FormEvent) {
     e.preventDefault();
     if (!review) return;
     setIsApplyingCorrection(true);
     setCorrectionError(null);
 
-    const currentCaption = (review.caption_text || review.content_text || '').trim();
-
     try {
-      if (correctionMode === 'caption') {
-        // Caption Correction Workflow
-        if (!replaceTargetText.trim()) {
-          throw new Error('Please specify the snippet to replace in the caption.');
-        }
+      // Image Pixel Correction Workflow
+      let newCorrectedUrl: string;
 
-        const lowerCaption = currentCaption.toLowerCase();
-        const targetIdx = lowerCaption.indexOf(replaceTargetText.trim().toLowerCase());
-        if (targetIdx === -1) {
-          throw new Error(
-            `Target snippet "${replaceTargetText}" was not found in the current caption. Copy was not modified.`
-          );
-        }
-
-        const updatedCaption =
-          currentCaption.slice(0, targetIdx) +
-          newReplacementText.trim() +
-          currentCaption.slice(targetIdx + replaceTargetText.trim().length);
-
-        const res = await fetch(`/api/reviews/${id}/reanalyze`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            updated_caption_text: updatedCaption,
-            correction_metadata: {
-              replaced_text: replaceTargetText.trim(),
-              new_text: newReplacementText.trim(),
-              target_scope: 'caption',
-              edit_applied_to_pixels: false,
-              caption_before: currentCaption,
-              caption_after: updatedCaption,
-              correction_notes: `Synchronized caption copy: "${replaceTargetText.trim()}" -> "${newReplacementText.trim()}".`,
-            },
-          }),
-        });
-
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || 'Re-analysis failed.');
-
-        if (data.review) {
-          setReview(data.review);
-        }
-
-        setIsCorrectionModalOpen(false);
-        setViewMode('split');
-        setEvalSuccessNotice(
-          `Creative caption synchronized and re-evaluated! Version ${data.review?.review_version} created. Resolved: ${data.resolvedFindings?.length || 0} issue(s), Remaining: ${data.remainingFindings?.length || 0}.`
-        );
+      if (uploadedRevisedFile) {
+        // 1. Upload user-provided revised file
+        const formData = new FormData();
+        formData.append('file', uploadedRevisedFile);
+        formData.append('category', 'creatives');
+        const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
+        const uploadData = await uploadRes.json();
+        if (!uploadRes.ok) throw new Error(uploadData.error || 'Failed to upload revised image.');
+        newCorrectedUrl = uploadData.url;
       } else {
-        // Image Pixel Correction Workflow
-        let newCorrectedUrl: string;
-
-        if (uploadedRevisedFile) {
-          // 1. Upload user-provided revised file
-          const formData = new FormData();
-          formData.append('file', uploadedRevisedFile);
-          formData.append('category', 'creatives');
-          const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
-          const uploadData = await uploadRes.json();
-          if (!uploadRes.ok) throw new Error(uploadData.error || 'Failed to upload revised image.');
-          newCorrectedUrl = uploadData.url;
-        } else {
-          // 2. Perform real Canvas-based Inpainting on the actual creative
-          const sourceImgUrl = review.image_url;
-          if (!sourceImgUrl) {
-            throw new Error('No uploaded image available for graphic revision.');
-          }
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          if (!ctx) throw new Error('Could not initialize canvas graphics context.');
-
-          const img = new Image();
-          img.crossOrigin = 'anonymous';
-          await new Promise<void>((resolve, reject) => {
-            img.onload = () => resolve();
-            img.onerror = () => reject(new Error('Failed to load image for pixel editing.'));
-            img.src = sourceImgUrl;
-          });
-
-          canvas.width = img.naturalWidth || 1080;
-          canvas.height = img.naturalHeight || 1080;
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-          const bbox = correctionTargetFinding?.bounding_box;
-          const correctionText = newReplacementText.trim() || replaceTargetText.trim() || 'Approved Correction';
-          if (bbox) {
-            const x = (bbox.xmin / 1000) * canvas.width;
-            const y = (bbox.ymin / 1000) * canvas.height;
-            const w = ((bbox.xmax - bbox.xmin) / 1000) * canvas.width;
-            const h = ((bbox.ymax - bbox.ymin) / 1000) * canvas.height;
-
-            ctx.fillStyle = '#0f766e';
-            ctx.fillRect(x - 5, y - 5, w + 10, h + 10);
-            ctx.strokeStyle = '#2dd4bf';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(x - 5, y - 5, w + 10, h + 10);
-
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 26px sans-serif';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(correctionText, x + 15, y + h / 2);
-          } else {
-            ctx.fillStyle = '#0f766e';
-            ctx.fillRect(80, canvas.height - 180, canvas.width - 160, 90);
-            ctx.strokeStyle = '#2dd4bf';
-            ctx.lineWidth = 2;
-            ctx.strokeRect(80, canvas.height - 180, canvas.width - 160, 90);
-
-            ctx.fillStyle = '#ffffff';
-            ctx.font = 'bold 24px sans-serif';
-            ctx.fillText(correctionText, 110, canvas.height - 130);
-          }
-
-          const blob = await new Promise<Blob | null>((resolve) =>
-            canvas.toBlob((b) => resolve(b), 'image/png')
-          );
-          if (!blob) throw new Error('Canvas export failed.');
-
-          const formData = new FormData();
-          formData.append('file', blob, `corrected_${id}_v${(review.review_version || 1) + 1}.png`);
-          formData.append('category', 'creatives');
-
-          const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
-          const uploadData = await uploadRes.json();
-          if (!uploadRes.ok) throw new Error(uploadData.error || 'Failed to save corrected creative.');
-          newCorrectedUrl = uploadData.url;
+        // 2. Perform real Canvas-based Inpainting on the actual creative
+        const sourceImgUrl = review.image_url;
+        if (!sourceImgUrl) {
+          throw new Error('No uploaded image available for graphic revision.');
         }
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        if (!ctx) throw new Error('Could not initialize canvas graphics context.');
 
-        const reanalyzeRes = await fetch(`/api/reviews/${id}/reanalyze`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            corrected_image_url: newCorrectedUrl,
-            correction_metadata: {
-              replaced_text: replaceTargetText.trim(),
-              new_text: newReplacementText.trim(),
-              replaced_asset_id: selectedReplacementAssetId || undefined,
-              target_scope: 'image',
-              edit_applied_to_pixels: true,
-              correction_notes: `Corrected creative graphic directly in pixels: "${replaceTargetText.trim()}" -> "${newReplacementText.trim()}".`,
-            },
-          }),
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve();
+          img.onerror = () => reject(new Error('Failed to load image for pixel editing.'));
+          img.src = sourceImgUrl;
         });
 
-        const reanalyzeData = await reanalyzeRes.json();
-        if (!reanalyzeRes.ok) throw new Error(reanalyzeData.error || 'Reanalysis failed.');
+        canvas.width = img.naturalWidth || 1080;
+        canvas.height = img.naturalHeight || 1080;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-        if (reanalyzeData.review) {
-          setReview(reanalyzeData.review);
+        const bbox = correctionTargetFinding?.bounding_box;
+        const correctionText = newReplacementText.trim() || replaceTargetText.trim() || 'Approved Correction';
+        if (bbox) {
+          const x = (bbox.xmin / 1000) * canvas.width;
+          const y = (bbox.ymin / 1000) * canvas.height;
+          const w = ((bbox.xmax - bbox.xmin) / 1000) * canvas.width;
+          const h = ((bbox.ymax - bbox.ymin) / 1000) * canvas.height;
+
+          ctx.fillStyle = '#0f766e';
+          ctx.fillRect(x - 5, y - 5, w + 10, h + 10);
+          ctx.strokeStyle = '#2dd4bf';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(x - 5, y - 5, w + 10, h + 10);
+
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 26px sans-serif';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(correctionText, x + 15, y + h / 2);
+        } else {
+          ctx.fillStyle = '#0f766e';
+          ctx.fillRect(80, canvas.height - 180, canvas.width - 160, 90);
+          ctx.strokeStyle = '#2dd4bf';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(80, canvas.height - 180, canvas.width - 160, 90);
+
+          ctx.fillStyle = '#ffffff';
+          ctx.font = 'bold 24px sans-serif';
+          ctx.fillText(correctionText, 110, canvas.height - 130);
         }
 
-        setIsCorrectionModalOpen(false);
-        setViewMode('split');
-        setEvalSuccessNotice(
-          `Creative graphic updated and re-evaluated! Version ${reanalyzeData.review?.review_version} created. Resolved: ${reanalyzeData.resolvedFindings?.length || 0} issue(s), Remaining: ${reanalyzeData.remainingFindings?.length || 0}.`
+        const blob = await new Promise<Blob | null>((resolve) =>
+          canvas.toBlob((b) => resolve(b), 'image/png')
         );
+        if (!blob) throw new Error('Canvas export failed.');
+
+        const formData = new FormData();
+        formData.append('file', blob, `corrected_${id}_v${(review.review_version || 1) + 1}.png`);
+        formData.append('category', 'creatives');
+
+        const uploadRes = await fetch('/api/upload', { method: 'POST', body: formData });
+        const uploadData = await uploadRes.json();
+        if (!uploadRes.ok) throw new Error(uploadData.error || 'Failed to save corrected creative.');
+        newCorrectedUrl = uploadData.url;
       }
+
+      const reanalyzeRes = await fetch(`/api/reviews/${id}/reanalyze`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          corrected_image_url: newCorrectedUrl,
+          correction_metadata: {
+            replaced_text: replaceTargetText.trim(),
+            new_text: newReplacementText.trim(),
+            replaced_asset_id: selectedReplacementAssetId || undefined,
+            target_scope: 'image',
+            edit_applied_to_pixels: true,
+            correction_notes: `Corrected creative graphic directly in pixels: "${replaceTargetText.trim()}" -> "${newReplacementText.trim()}".`,
+          },
+        }),
+      });
+
+      const reanalyzeData = await reanalyzeRes.json();
+      if (!reanalyzeRes.ok) throw new Error(reanalyzeData.error || 'Reanalysis failed.');
+
+      if (reanalyzeData.review) {
+        setReview(reanalyzeData.review);
+      }
+
+      setIsCorrectionModalOpen(false);
+      setViewMode('split');
+      setEvalSuccessNotice(
+        `Creative graphic updated and re-evaluated! Version ${reanalyzeData.review?.review_version} created. Resolved: ${reanalyzeData.resolvedFindings?.length || 0} issue(s), Remaining: ${reanalyzeData.remainingFindings?.length || 0}.`
+      );
     } catch (err: unknown) {
       setCorrectionError(err instanceof Error ? err.message : 'Failed to apply correction.');
     } finally {
@@ -514,128 +375,6 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
       setDecisionError(err instanceof Error ? err.message : 'Failed to record decision');
     } finally {
       setIsSubmittingDecision(false);
-    }
-  }
-
-  // Download PDF Report
-  async function handleDownloadPdf() {
-    if (!id) return;
-    setIsDownloadingPdf(true);
-    try {
-      const res = await fetch(`/api/reviews/${id}/report/pdf`);
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Failed to generate PDF report');
-      }
-
-      // Read Content-Disposition header if available
-      const disposition = res.headers.get('Content-Disposition');
-      const version = review?.review_version || 1;
-      const sanitizedTitle = (review?.title || 'Campaign-Post')
-        .trim()
-        .replace(/[^a-zA-Z0-9_-]/g, '_')
-        .replace(/_{2,}/g, '_')
-        .replace(/^_+|_+$/g, '')
-        .slice(0, 40) || 'Campaign-Post';
-      let filename = `BrandGuard_Report_${sanitizedTitle}_v${version}.pdf`;
-
-      if (disposition) {
-        const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-        if (utf8Match?.[1]) {
-          filename = decodeURIComponent(utf8Match[1].trim().replace(/^["']|["']$/g, ''));
-        } else {
-          const match = disposition.match(/filename=["']?([^"';]+)["']?/i);
-          if (match?.[1]) {
-            filename = match[1].trim();
-          }
-        }
-      }
-
-      if (!filename.toLowerCase().endsWith('.pdf')) {
-        filename += '.pdf';
-      }
-
-      const blob = await res.blob();
-      // Ensure explicit application/pdf MIME type on client Blob
-      const pdfBlob = new Blob([blob], { type: 'application/pdf' });
-      const url = window.URL.createObjectURL(pdfBlob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-
-      // Delay revoking the object URL by 3 seconds so the browser download manager
-      // finishes reading the blob without falling back to a revoked UUID filename or truncated stream.
-      setTimeout(() => {
-        window.URL.revokeObjectURL(url);
-        a.remove();
-      }, 3000);
-    } catch (err: unknown) {
-      console.error('Download PDF error:', err);
-      alert(err instanceof Error ? err.message : 'Failed to download report PDF');
-    } finally {
-      setIsDownloadingPdf(false);
-    }
-  }
-
-  // Export JSON Data
-  async function handleExportJson() {
-    if (!id) return;
-    setIsExportingJson(true);
-    try {
-      const res = await fetch(`/api/reviews/${id}/export/json`);
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || 'Failed to export review JSON');
-      }
-
-      const disposition = res.headers.get('Content-Disposition');
-      const version = review?.review_version || 1;
-      const sanitizedTitle = (review?.title || 'Data-Export')
-        .trim()
-        .replace(/[^a-zA-Z0-9_-]/g, '_')
-        .replace(/_{2,}/g, '_')
-        .replace(/^_+|_+$/g, '')
-        .slice(0, 40) || 'Data-Export';
-      let filename = `BrandGuard_Data_${sanitizedTitle}_v${version}.json`;
-
-      if (disposition) {
-        const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-        if (utf8Match?.[1]) {
-          filename = decodeURIComponent(utf8Match[1].trim().replace(/^["']|["']$/g, ''));
-        } else {
-          const match = disposition.match(/filename=["']?([^"';]+)["']?/i);
-          if (match?.[1]) {
-            filename = match[1].trim();
-          }
-        }
-      }
-
-      if (!filename.toLowerCase().endsWith('.json')) {
-        filename += '.json';
-      }
-
-      const blob = await res.blob();
-      const jsonBlob = new Blob([blob], { type: 'application/json' });
-      const url = window.URL.createObjectURL(jsonBlob);
-      const a = document.createElement('a');
-      a.style.display = 'none';
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-
-      setTimeout(() => {
-        window.URL.revokeObjectURL(url);
-        a.remove();
-      }, 3000);
-    } catch (err: unknown) {
-      console.error('Export JSON error:', err);
-      alert(err instanceof Error ? err.message : 'Failed to export review JSON');
-    } finally {
-      setIsExportingJson(false);
     }
   }
 
@@ -689,129 +428,140 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
   const isDraftOrIncomplete = review.status === 'draft' || review.compliance_score === null || review.compliance_score === undefined;
   const hasCorrectedVersion =
     (review.review_version > 1) ||
-    Boolean(review.corrected_image_url) ||
-    Boolean(review.original_caption_text && review.caption_text && review.caption_text !== review.original_caption_text);
+    Boolean(review.corrected_image_url);
 
-  // Section 2: OCR Text and Text Errors (Pillar A)
-  const ocrTextErrorsList = review.findings?.filter(
+  // Category 1: Spelling & Text Accuracy
+  const spellingAndTextList = review.findings?.filter(
     (f) =>
+      f.category === 'spelling_and_text' ||
       f.category === 'spelling_and_grammar' ||
       f.category === 'typography' ||
       f.finding_title.toLowerCase().includes('spelling') ||
       f.finding_title.toLowerCase().includes('duplicate') ||
-      f.finding_title.toLowerCase().includes('cut-off') ||
       f.finding_title.toLowerCase().includes('typo')
   ) || [];
 
-  // Section 3: Visual Design Issues (Pillar B)
-  const visualDesignIssuesList = review.findings?.filter(
+  // Category 2: Logo and Brand Identity
+  const logoAndBrandList = review.findings?.filter(
     (f) =>
+      f.category === 'logo_and_brand' ||
+      f.category === 'logo_integrity' ||
+      f.category === 'brand_guideline' ||
+      f.finding_title.toLowerCase().includes('logo') ||
+      f.finding_title.toLowerCase().includes('palette')
+  ) || [];
+
+  // Category 3: Abusive or Harmful Language
+  const abusiveLanguageList = review.findings?.filter(
+    (f) =>
+      f.category === 'abusive_language' ||
+      f.category === 'harmful_language' ||
+      f.finding_title.toLowerCase().includes('profanity') ||
+      f.finding_title.toLowerCase().includes('harmful')
+  ) || [];
+
+  // Category 4: Layout and Visual Quality
+  const layoutAndDesignList = review.findings?.filter(
+    (f) =>
+      f.category === 'layout_and_design' ||
       f.category === 'visual_design_quality' ||
-      f.category === 'unreadable_content' ||
       f.category === 'layout' ||
       f.finding_title.toLowerCase().includes('resolution') ||
       f.finding_title.toLowerCase().includes('pixelation') ||
       f.finding_title.toLowerCase().includes('obscured') ||
-      f.finding_title.toLowerCase().includes('disclaimer') ||
       f.finding_title.toLowerCase().includes('contrast')
   ) || [];
 
-  // Section 4: Potential Copyright / IP Risks (Pillar C)
-  const copyrightIpRisksList = review.findings?.filter(
+  // Category 5: Claims and Internal Consistency
+  const claimsAndConsistencyList = review.findings?.filter(
     (f) =>
+      f.category === 'claims_and_consistency' ||
+      f.category === 'brand_marketing_claim' ||
+      f.category === 'prohibited_claim' ||
+      f.category === 'voice_and_tone' ||
+      f.finding_title.toLowerCase().includes('claim') ||
+      f.finding_title.toLowerCase().includes('contradiction') ||
+      f.finding_title.toLowerCase().includes('discount') ||
+      f.finding_title.toLowerCase().includes('absolute')
+  ) || [];
+
+  // Category 6: Potential Copyright / IP Risks
+  const copyrightIpList = review.findings?.filter(
+    (f) =>
+      f.category === 'copyright_trademark_ip' ||
       f.category === 'copyright_and_ip_risk' ||
-      f.category === 'logo_integrity' ||
       f.finding_title.toLowerCase().includes('copyright') ||
       f.finding_title.toLowerCase().includes('trademark') ||
-      f.finding_title.toLowerCase().includes('watermark') ||
-      f.finding_title.toLowerCase().includes('third-party') ||
-      f.finding_title.toLowerCase().includes('intellectual property')
+      f.finding_title.toLowerCase().includes('watermark')
   ) || [];
 
-  // Section 5: Brand and Marketing Claim Checks (Pillar D)
-  const brandClaimChecksList = review.findings?.filter(
-    (f) =>
-      (f.category === 'brand_marketing_claim' ||
-       f.category === 'prohibited_claim' ||
-       f.category === 'voice_and_tone' ||
-       f.finding_title.toLowerCase().includes('conflicting') ||
-       f.finding_title.toLowerCase().includes('contradictory') ||
-       f.finding_title.toLowerCase().includes('discount') ||
-       f.finding_title.toLowerCase().includes('absolute') ||
-       f.finding_title.toLowerCase().includes('unsubstantiated') ||
-       f.finding_title.toLowerCase().includes('prohibited')) &&
-      f.target_scope !== 'caption' &&
-      !(f.target_scope === 'both' && f.category === 'cross_modal_conflict')
-  ) || [];
-
-  // Section 6: Caption Analysis (Priority 2)
-  const captionAnalysisList = review.findings?.filter(
-    (f) =>
-      f.target_scope === 'caption' &&
-      f.category !== 'cross_modal_conflict'
-  ) || [];
-
-  // Section 7: Image-versus-Caption Conflicts (Priority 3)
-  const crossModalConflictsList = review.findings?.filter(
-    (f) =>
-      f.target_scope === 'both' ||
-      f.category === 'cross_modal_conflict'
+  // Category 7: Other Visible Issues
+  const otherIssuesList = review.findings?.filter(
+    (f) => f.category === 'other_visible_issues'
   ) || [];
 
   const displayedFindings = (review.findings || []).filter((f) => {
-    if (findingsCategoryFilter === 'ocr_errors') {
+    if (findingsCategoryFilter === 'spelling_and_text') {
       return (
+        f.category === 'spelling_and_text' ||
         f.category === 'spelling_and_grammar' ||
         f.category === 'typography' ||
         f.finding_title.toLowerCase().includes('spelling') ||
         f.finding_title.toLowerCase().includes('duplicate') ||
-        f.finding_title.toLowerCase().includes('cut-off') ||
         f.finding_title.toLowerCase().includes('typo')
       );
     }
-    if (findingsCategoryFilter === 'visual_design') {
+    if (findingsCategoryFilter === 'logo_and_brand') {
       return (
+        f.category === 'logo_and_brand' ||
+        f.category === 'logo_integrity' ||
+        f.category === 'brand_guideline' ||
+        f.finding_title.toLowerCase().includes('logo') ||
+        f.finding_title.toLowerCase().includes('palette')
+      );
+    }
+    if (findingsCategoryFilter === 'abusive_language') {
+      return (
+        f.category === 'abusive_language' ||
+        f.category === 'harmful_language' ||
+        f.finding_title.toLowerCase().includes('profanity') ||
+        f.finding_title.toLowerCase().includes('harmful')
+      );
+    }
+    if (findingsCategoryFilter === 'layout_and_design') {
+      return (
+        f.category === 'layout_and_design' ||
         f.category === 'visual_design_quality' ||
-        f.category === 'unreadable_content' ||
         f.category === 'layout' ||
         f.finding_title.toLowerCase().includes('resolution') ||
         f.finding_title.toLowerCase().includes('pixelation') ||
         f.finding_title.toLowerCase().includes('obscured') ||
-        f.finding_title.toLowerCase().includes('disclaimer') ||
         f.finding_title.toLowerCase().includes('contrast')
       );
     }
-    if (findingsCategoryFilter === 'copyright_ip') {
+    if (findingsCategoryFilter === 'claims_and_consistency') {
       return (
+        f.category === 'claims_and_consistency' ||
+        f.category === 'brand_marketing_claim' ||
+        f.category === 'prohibited_claim' ||
+        f.category === 'voice_and_tone' ||
+        f.finding_title.toLowerCase().includes('claim') ||
+        f.finding_title.toLowerCase().includes('contradiction') ||
+        f.finding_title.toLowerCase().includes('discount') ||
+        f.finding_title.toLowerCase().includes('absolute')
+      );
+    }
+    if (findingsCategoryFilter === 'copyright_trademark_ip') {
+      return (
+        f.category === 'copyright_trademark_ip' ||
         f.category === 'copyright_and_ip_risk' ||
-        f.category === 'logo_integrity' ||
         f.finding_title.toLowerCase().includes('copyright') ||
         f.finding_title.toLowerCase().includes('trademark') ||
-        f.finding_title.toLowerCase().includes('watermark') ||
-        f.finding_title.toLowerCase().includes('third-party') ||
-        f.finding_title.toLowerCase().includes('intellectual property')
+        f.finding_title.toLowerCase().includes('watermark')
       );
     }
-    if (findingsCategoryFilter === 'brand_claims') {
-      return (
-        (f.category === 'brand_marketing_claim' ||
-         f.category === 'prohibited_claim' ||
-         f.category === 'voice_and_tone' ||
-         f.finding_title.toLowerCase().includes('conflicting') ||
-         f.finding_title.toLowerCase().includes('contradictory') ||
-         f.finding_title.toLowerCase().includes('discount') ||
-         f.finding_title.toLowerCase().includes('absolute') ||
-         f.finding_title.toLowerCase().includes('unsubstantiated') ||
-         f.finding_title.toLowerCase().includes('prohibited')) &&
-        f.target_scope !== 'caption' &&
-        !(f.target_scope === 'both' && f.category === 'cross_modal_conflict')
-      );
-    }
-    if (findingsCategoryFilter === 'caption_analysis') {
-      return f.target_scope === 'caption' && f.category !== 'cross_modal_conflict';
-    }
-    if (findingsCategoryFilter === 'cross_modal') {
-      return f.target_scope === 'both' || f.category === 'cross_modal_conflict';
+    if (findingsCategoryFilter === 'other_visible_issues') {
+      return f.category === 'other_visible_issues';
     }
     return true;
   });
@@ -1059,10 +809,10 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                       </div>
                       <div className="p-2.5 rounded-lg bg-white border border-gray-200 text-xs text-gray-700">
                         <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide block mb-0.5">
-                          Original Caption (v1):
+                          Original Creative Version 1
                         </span>
-                        <p className="text-[11px] font-mono leading-relaxed text-gray-800 break-words">
-                          {review.original_caption_text || review.content_text}
+                        <p className="text-[11px] text-gray-600">
+                          Initial submission prior to graphic revision.
                         </p>
                       </div>
                     </div>
@@ -1075,7 +825,7 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                           Corrected Version {review.review_version} (Re-analyzed)
                         </span>
                         <span className="text-[10px] text-emerald-700 font-mono">
-                          {hasGenuinePixelEdit ? 'Pixels Applied' : 'Caption-Only Correction'}
+                          {hasGenuinePixelEdit ? 'Pixels Applied' : 'Graphic Revised'}
                         </span>
                       </div>
                       <div className="relative rounded-lg border border-teal-200 bg-gray-50 overflow-hidden flex items-center justify-center p-2 min-h-[300px]">
@@ -1096,14 +846,11 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                       <div className="p-2.5 rounded-lg bg-white border border-teal-200 text-xs text-gray-700">
                         <div className="flex items-center justify-between mb-0.5">
                           <span className="text-[10px] font-semibold text-teal-800 uppercase tracking-wide">
-                            Updated Caption (v{review.review_version}):
+                            Revised Creative Graphic (v{review.review_version})
                           </span>
-                          {!hasGenuinePixelEdit && (
-                            <span className="text-[10px] text-gray-500 italic">Creative Pixels Retained</span>
-                          )}
                         </div>
-                        <p className="text-[11px] font-mono leading-relaxed text-gray-900 font-medium break-words">
-                          {review.caption_text || review.content_text}
+                        <p className="text-[11px] text-gray-700">
+                          Updated image pixels evaluated against the 7 visual governance categories.
                         </p>
                       </div>
                     </div>
@@ -1182,17 +929,10 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                     <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide">
                       Modality:
                     </span>
-                    {review.caption_text ? (
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800 border border-purple-200 flex items-center gap-1">
-                        <Layers className="w-3 h-3" />
-                        Multimodal (Image + Caption Copy)
-                      </span>
-                    ) : (
-                      <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 border border-teal-200 flex items-center gap-1">
-                        <ImageIcon className="w-3 h-3" />
-                        Image-Only (Visual Elements & Typography)
-                      </span>
-                    )}
+                    <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-teal-100 text-teal-800 border border-teal-200 flex items-center gap-1">
+                      <ImageIcon className="w-3 h-3" />
+                      Image-Only (Pixel & Typography Governance)
+                    </span>
                   </div>
 
                   <div className="flex items-center gap-2 text-[11px] text-gray-600 font-medium">
@@ -1252,14 +992,10 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                   </div>
 
                   <div className="flex items-center gap-1.5 text-[10px] bg-white p-1.5 rounded border border-gray-200">
-                    {review.caption_text && review.extracted_ocr_text ? (
-                      <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
-                    ) : (
-                      <Info className="w-3 h-3 text-amber-500 shrink-0" />
-                    )}
-                    <span className="text-gray-600 truncate">Cross-Modal:</span>
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                    <span className="text-gray-600 truncate">Image Scope:</span>
                     <span className="font-semibold text-gray-800 ml-auto">
-                      {review.caption_text && review.extracted_ocr_text ? 'Audited' : 'N/A (Image-Only)'}
+                      7 Categories
                     </span>
                   </div>
 
@@ -1287,21 +1023,6 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                     </span>
                   </div>
                 </div>
-              </div>
-            )}
-
-            {/* Post Caption (if present) */}
-            {review.caption_text && (
-              <div className="mt-3 p-3 rounded-lg bg-gray-50 border border-gray-200">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-xs font-semibold text-gray-700">Accompanying Post Caption</span>
-                  <span className="text-[10px] text-gray-400 font-mono">
-                    {review.caption_text.length} chars
-                  </span>
-                </div>
-                <p className="text-xs text-gray-700 bg-white p-2.5 rounded border border-gray-200 leading-relaxed font-normal">
-                  {review.caption_text}
-                </p>
               </div>
             )}
 
@@ -1460,10 +1181,10 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                   </CardTitle>
                 </div>
                 <CardDescription>
-                  Verified independently across Image Inspection, Caption Audit, and Cross-Modal Consistency
+                  Verified across the 7 Image-First Governance categories with coordinate bounding boxes
                 </CardDescription>
 
-                {/* 8-Section Filter Pills */}
+                {/* 7-Category Filter Pills */}
                 <div className="flex flex-wrap items-center gap-1.5 pt-1">
                   <button
                     type="button"
@@ -1478,76 +1199,90 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFindingsCategoryFilter('ocr_errors')}
+                    onClick={() => setFindingsCategoryFilter('spelling_and_text')}
                     className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer ${
-                      findingsCategoryFilter === 'ocr_errors'
+                      findingsCategoryFilter === 'spelling_and_text'
                         ? 'bg-orange-700 text-white shadow-sm ring-1 ring-orange-700'
                         : 'bg-orange-50 text-orange-950 hover:bg-orange-100 border border-orange-200'
                     }`}
                   >
-                    <span>2. Text & Typos</span>
-                    <span className="font-mono text-[10px] opacity-80">({ocrTextErrorsList.length})</span>
+                    <span>1. Spelling & Text</span>
+                    <span className="font-mono text-[10px] opacity-80">({spellingAndTextList.length})</span>
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFindingsCategoryFilter('visual_design')}
+                    onClick={() => setFindingsCategoryFilter('logo_and_brand')}
                     className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer ${
-                      findingsCategoryFilter === 'visual_design'
+                      findingsCategoryFilter === 'logo_and_brand'
+                        ? 'bg-teal-700 text-white shadow-sm ring-1 ring-teal-700'
+                        : 'bg-teal-50 text-teal-950 hover:bg-teal-100 border border-teal-200'
+                    }`}
+                  >
+                    <span>2. Logo & Brand</span>
+                    <span className="font-mono text-[10px] opacity-80">({logoAndBrandList.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFindingsCategoryFilter('abusive_language')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer ${
+                      findingsCategoryFilter === 'abusive_language'
+                        ? 'bg-red-700 text-white shadow-sm ring-1 ring-red-700'
+                        : 'bg-red-50 text-red-950 hover:bg-red-100 border border-red-200'
+                    }`}
+                  >
+                    <span>3. Harmful Content</span>
+                    <span className="font-mono text-[10px] opacity-80">({abusiveLanguageList.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFindingsCategoryFilter('layout_and_design')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer ${
+                      findingsCategoryFilter === 'layout_and_design'
                         ? 'bg-sky-700 text-white shadow-sm ring-1 ring-sky-700'
                         : 'bg-sky-50 text-sky-900 hover:bg-sky-100 border border-sky-200'
                     }`}
                   >
-                    <span>3. Visual Design</span>
-                    <span className="font-mono text-[10px] opacity-80">({visualDesignIssuesList.length})</span>
+                    <span>4. Layout & Design</span>
+                    <span className="font-mono text-[10px] opacity-80">({layoutAndDesignList.length})</span>
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFindingsCategoryFilter('copyright_ip')}
+                    onClick={() => setFindingsCategoryFilter('claims_and_consistency')}
                     className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer ${
-                      findingsCategoryFilter === 'copyright_ip'
-                        ? 'bg-purple-700 text-white shadow-sm ring-1 ring-purple-700'
-                        : 'bg-purple-50 text-purple-950 hover:bg-purple-100 border border-purple-200'
-                    }`}
-                  >
-                    <span>4. Copyright & IP</span>
-                    <span className="font-mono text-[10px] opacity-80">({copyrightIpRisksList.length})</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFindingsCategoryFilter('brand_claims')}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer ${
-                      findingsCategoryFilter === 'brand_claims'
+                      findingsCategoryFilter === 'claims_and_consistency'
                         ? 'bg-rose-700 text-white shadow-sm ring-1 ring-rose-700'
                         : 'bg-rose-50 text-rose-950 hover:bg-rose-100 border border-rose-200'
                     }`}
                   >
-                    <span>5. Claims & Contradictions</span>
-                    <span className="font-mono text-[10px] opacity-80">({brandClaimChecksList.length})</span>
+                    <span>5. Claims & Facts</span>
+                    <span className="font-mono text-[10px] opacity-80">({claimsAndConsistencyList.length})</span>
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFindingsCategoryFilter('caption_analysis')}
+                    onClick={() => setFindingsCategoryFilter('copyright_trademark_ip')}
                     className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer ${
-                      findingsCategoryFilter === 'caption_analysis'
-                        ? 'bg-amber-700 text-white shadow-sm ring-1 ring-amber-700'
-                        : 'bg-amber-50 text-amber-950 hover:bg-amber-100 border border-amber-200'
+                      findingsCategoryFilter === 'copyright_trademark_ip'
+                        ? 'bg-purple-700 text-white shadow-sm ring-1 ring-purple-700'
+                        : 'bg-purple-50 text-purple-950 hover:bg-purple-100 border border-purple-200'
                     }`}
                   >
-                    <span>6. Caption</span>
-                    <span className="font-mono text-[10px] opacity-80">({captionAnalysisList.length})</span>
+                    <span>6. IP & Trademarks</span>
+                    <span className="font-mono text-[10px] opacity-80">({copyrightIpList.length})</span>
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => setFindingsCategoryFilter('cross_modal')}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer ${
-                      findingsCategoryFilter === 'cross_modal'
-                        ? 'bg-indigo-700 text-white shadow-sm ring-1 ring-indigo-700'
-                        : 'bg-indigo-50 text-indigo-950 hover:bg-indigo-100 border border-indigo-200'
-                    }`}
-                  >
-                    <span>7. Conflicts</span>
-                    <span className="font-mono text-[10px] opacity-80">({crossModalConflictsList.length})</span>
-                  </button>
+                  {otherIssuesList.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setFindingsCategoryFilter('other_visible_issues')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer ${
+                        findingsCategoryFilter === 'other_visible_issues'
+                          ? 'bg-gray-700 text-white shadow-sm ring-1 ring-gray-700'
+                          : 'bg-gray-50 text-gray-950 hover:bg-gray-100 border border-gray-200'
+                      }`}
+                    >
+                      <span>7. Other Issues</span>
+                      <span className="font-mono text-[10px] opacity-80">({otherIssuesList.length})</span>
+                    </button>
+                  )}
                 </div>
               </div>
             </CardHeader>
@@ -1595,10 +1330,6 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                 {displayedFindings.map((f, i) => {
                   const isHovered = hoveredFindingId === f.id;
                   const isSelected = selectedFindingId === f.id;
-                  const isConflict = f.target_scope === 'both' || f.category === 'cross_modal_conflict';
-                  const isImageIssue = f.target_scope === 'image' || (!isConflict && f.source === 'image');
-                  const isCaptionIssue = f.target_scope === 'caption' || (!isConflict && f.source === 'caption');
-
                   return (
                     <div
                       key={f.id || i}
@@ -1614,7 +1345,7 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                           : 'border-slate-200 hover:border-slate-300'
                       }`}
                     >
-                      {/* Top Metadata Row: Number, Severity, Scope, Category, Confidence */}
+                      {/* Top Metadata Row: Number, Severity, Category, Confidence */}
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="text-xs font-mono font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
@@ -1640,48 +1371,40 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                             </span>
                           )}
 
-                          {/* Stage / Scope Tag */}
-                          {isConflict ? (
-                            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-purple-100 text-purple-900 border border-purple-200 flex items-center gap-1.5">
-                              <Layers className="w-3.5 h-3.5 text-purple-700 shrink-0" />
-                              Cross-Modal Conflict
-                            </span>
-                          ) : isImageIssue ? (
-                            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-sky-100 text-sky-900 border border-sky-200 flex items-center gap-1.5">
-                              <ImageIcon className="w-3.5 h-3.5 text-sky-700 shrink-0" />
-                              Image Issue
-                            </span>
-                          ) : isCaptionIssue ? (
-                            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-amber-100 text-amber-950 border border-amber-200 flex items-center gap-1.5">
-                              <FileText className="w-3.5 h-3.5 text-amber-700 shrink-0" />
-                              Caption Issue
-                            </span>
-                          ) : null}
+                          {/* Image Issue Tag */}
+                          <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-teal-50 text-teal-900 border border-teal-200 flex items-center gap-1.5">
+                            <ImageIcon className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                            Image Finding
+                          </span>
 
                           {/* Category Descriptor */}
-                          {f.category === 'spelling_and_grammar' ? (
+                          {f.category === 'spelling_and_text' || f.category === 'spelling_and_grammar' ? (
                             <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-orange-50 text-orange-950 border border-orange-200">
-                              2. Spelling & Typography
+                              1. Spelling & Text
                             </span>
-                          ) : f.category === 'visual_design_quality' || f.category === 'unreadable_content' ? (
+                          ) : f.category === 'logo_and_brand' ? (
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-teal-50 text-teal-950 border border-teal-200">
+                              2. Logo & Brand
+                            </span>
+                          ) : f.category === 'abusive_language' ? (
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-red-50 text-red-950 border border-red-200">
+                              3. Harmful Content
+                            </span>
+                          ) : f.category === 'layout_and_design' || f.category === 'visual_design_quality' || f.category === 'unreadable_content' ? (
                             <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-sky-50 text-sky-950 border border-sky-200">
-                              3. Visual Design Quality
+                              4. Layout & Design
                             </span>
-                          ) : f.category === 'copyright_and_ip_risk' ? (
-                            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-purple-50 text-purple-950 border border-purple-200">
-                              4. Copyright & IP Risk
-                            </span>
-                          ) : f.category === 'brand_marketing_claim' ? (
+                          ) : f.category === 'claims_and_consistency' || f.category === 'brand_marketing_claim' ? (
                             <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-rose-50 text-rose-950 border border-rose-200">
-                              5. Brand & Claim Check
+                              5. Claims & Facts
                             </span>
-                          ) : f.category === 'cross_modal_conflict' ? (
-                            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-950 border border-indigo-200">
-                              7. Cross-Modal Conflict
+                          ) : f.category === 'copyright_trademark_ip' || f.category === 'copyright_and_ip_risk' ? (
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-purple-50 text-purple-950 border border-purple-200">
+                              6. IP & Trademarks
                             </span>
                           ) : (
                             <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-slate-50 text-slate-800 border border-slate-200">
-                              {f.category.replace(/_/g, ' ')}
+                              7. Other Issues
                             </span>
                           )}
                         </div>
@@ -1732,36 +1455,13 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                       )}
 
                       {/* Evidence Display with Clear Visual Distinction */}
-                      {isConflict && (f.image_evidence || f.caption_evidence) ? (
-                        <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200/90 text-sm space-y-2.5">
-                          {f.image_evidence && (
-                            <div className="flex flex-col sm:flex-row sm:items-baseline gap-1.5 sm:gap-2">
-                              <span className="text-xs font-bold text-sky-900 uppercase tracking-wider shrink-0 bg-sky-100/90 px-2 py-0.5 rounded border border-sky-200">
-                                Image Evidence:
-                              </span>
-                              <span className="text-rose-900 font-mono text-[13px] font-semibold break-words bg-white px-2.5 py-1 rounded border border-slate-200 flex-1">
-                                &ldquo;{f.image_evidence}&rdquo;
-                              </span>
-                            </div>
-                          )}
-                          {f.caption_evidence && (
-                            <div className="flex flex-col sm:flex-row sm:items-baseline gap-1.5 sm:gap-2">
-                              <span className="text-xs font-bold text-amber-900 uppercase tracking-wider shrink-0 bg-amber-100/90 px-2 py-0.5 rounded border border-amber-200">
-                                Caption Evidence:
-                              </span>
-                              <span className="text-rose-900 font-mono text-[13px] font-semibold break-words bg-white px-2.5 py-1 rounded border border-slate-200 flex-1">
-                                &ldquo;{f.caption_evidence}&rdquo;
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      ) : (f.evidence_text || f.image_evidence || f.caption_evidence) ? (
+                      {(f.evidence_text || f.image_evidence) ? (
                         <div className="p-3.5 rounded-lg bg-slate-50 border border-slate-200/90 text-sm">
                           <span className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">
-                            Detected Target Element:
+                            Detected Visual Element:
                           </span>
                           <span className="text-rose-900 font-mono text-[13px] font-semibold break-words bg-white px-2.5 py-1 rounded border border-slate-200 block">
-                            &ldquo;{f.evidence_text || f.caption_evidence || f.image_evidence}&rdquo;
+                            &ldquo;{f.evidence_text || f.image_evidence}&rdquo;
                           </span>
                         </div>
                       ) : null}
@@ -1988,210 +1688,109 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
         </form>
       </Modal>
 
-      {/* Interactive Creative Correction Studio Modal (Requirements 1, 2, 3, 4, 5) */}
+      {/* Interactive Creative Revision Studio Modal */}
       <Modal
         isOpen={isCorrectionModalOpen}
         onClose={() => setIsCorrectionModalOpen(false)}
         maxWidth="lg"
-        title="Interactive Creative Correction Studio"
-        description="Apply targeted corrections to marketing creative captions or assets, preserving version history and side-by-side audit telemetry."
+        title="Interactive Creative Revision Studio"
+        description="Apply revised graphics or direct inpainting overlays to creative pixels, creating a versioned audit history with side-by-side comparison."
       >
-        {(() => {
-          const currentCaption = (review.caption_text || review.content_text || '').trim();
-          const lowerCaption = currentCaption.toLowerCase();
-          const lowerTarget = replaceTargetText.trim().toLowerCase();
-          const targetIdx = lowerTarget ? lowerCaption.indexOf(lowerTarget) : -1;
-
-          return (
-            <form onSubmit={handleApplyCorrection} className="space-y-4">
-              {correctionError && (
-                <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800 flex items-start gap-2">
-                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                  <div>
-                    <span className="font-semibold block">Correction Failed</span>
-                    <span>{correctionError}</span>
-                  </div>
-                </div>
-              )}
-
-              {correctionTargetFinding && (
-                <div className="p-3 rounded-lg bg-teal-50 border border-teal-200 text-xs">
-                  <span className="font-semibold text-teal-900 block mb-0.5">
-                    Targeting Finding #{(review.findings ? review.findings.indexOf(correctionTargetFinding) : 0) + 1}: {correctionTargetFinding.finding_title}
-                  </span>
-                  <p className="text-teal-800 text-[11px]">{correctionTargetFinding.explanation}</p>
-                </div>
-              )}
-
-              {/* Mode Selector Tabs */}
-              <div className="flex rounded-lg bg-gray-100 p-1 text-xs font-medium">
-                <button
-                  type="button"
-                  onClick={() => setCorrectionMode('caption')}
-                  className={`flex-1 py-1.5 px-3 rounded-md transition-all flex items-center justify-center gap-1.5 ${
-                    correctionMode === 'caption'
-                      ? 'bg-white text-teal-900 shadow-xs font-semibold'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  <span>Synchronize Caption Copy (Recommended)</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setCorrectionMode('image')}
-                  className={`flex-1 py-1.5 px-3 rounded-md transition-all flex items-center justify-center gap-1.5 ${
-                    correctionMode === 'image'
-                      ? 'bg-white text-teal-900 shadow-xs font-semibold'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  <ImageIcon className="w-3.5 h-3.5" />
-                  <span>Revise Graphic Pixels / Upload</span>
-                </button>
+        <form onSubmit={handleApplyCorrection} className="space-y-4">
+          {correctionError && (
+            <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-xs text-red-800 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-semibold block">Correction Failed</span>
+                <span>{correctionError}</span>
               </div>
+            </div>
+          )}
 
-              {correctionMode === 'caption' ? (
-                /* Caption Copy Correction */
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Target Snippet in Caption to Replace
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={replaceTargetText}
-                      onChange={(e) => setReplaceTargetText(e.target.value)}
-                      placeholder="e.g. 24 hours"
-                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 font-mono focus:outline-none focus:border-teal-700"
-                    />
-                    <span className="text-[10px] text-gray-500 mt-0.5 block">
-                      The specific claim or phrase in the submitted post copy that will be updated.
-                    </span>
-                  </div>
+          {correctionTargetFinding && (
+            <div className="p-3 rounded-lg bg-teal-50 border border-teal-200 text-xs">
+              <span className="font-semibold text-teal-900 block mb-0.5">
+                Targeting Finding #{(review.findings ? review.findings.indexOf(correctionTargetFinding) : 0) + 1}: {correctionTargetFinding.finding_title}
+              </span>
+              <p className="text-teal-800 text-[11px]">{correctionTargetFinding.explanation}</p>
+            </div>
+          )}
 
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Approved Replacement Text
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      value={newReplacementText}
-                      onChange={(e) => setNewReplacementText(e.target.value)}
-                      placeholder="e.g. 72 hours"
-                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 font-mono focus:outline-none focus:border-teal-700"
-                    />
-                    <span className="text-[10px] text-gray-500 mt-0.5 block">
-                      The compliant, substantiated claim that aligns with creative imagery and brand guidelines.
-                    </span>
-                  </div>
+          {/* Graphic Revision Options */}
+          <div className="space-y-3">
+            <div>
+              <label className="block text-xs font-semibold text-gray-700 mb-1">
+                Upload Revised Creative Graphic (Designer Revision)
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => setUploadedRevisedFile(e.target.files?.[0] || null)}
+                className="w-full text-xs text-gray-700 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-teal-50 file:text-teal-800 hover:file:bg-teal-100"
+              />
+              <span className="text-[10px] text-gray-500 mt-0.5 block">
+                Upload an updated creative file if revisions were made in Figma, Illustrator, or Photoshop.
+              </span>
+            </div>
 
-                  {/* Live Caption Preview */}
-                  <div className="p-3 rounded-lg bg-teal-50/60 border border-teal-200 text-xs">
-                    <div className="flex items-center justify-between mb-1.5">
-                      <span className="font-semibold text-teal-900">
-                        Live Caption Preview (Version {(review.review_version || 1) + 1}):
-                      </span>
-                      <span className="text-[10px] text-teal-700 font-medium">Surrounding copy & hashtags preserved</span>
-                    </div>
-                    {targetIdx !== -1 ? (
-                      <p className="text-xs text-gray-800 leading-relaxed font-mono">
-                        <span>{currentCaption.slice(0, targetIdx)}</span>
-                        <mark className="bg-emerald-200 text-emerald-950 font-bold px-1 py-0.5 rounded border border-emerald-400">
-                          {newReplacementText || '(replacement)'}
-                        </mark>
-                        <span>{currentCaption.slice(targetIdx + replaceTargetText.trim().length)}</span>
-                      </p>
-                    ) : (
-                      <p className="text-xs text-amber-800 font-mono">
-                        ⚠️ Snippet &ldquo;{replaceTargetText}&rdquo; was not found in the current caption. Adjust the snippet above to preview.
-                      </p>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                /* Image Pixel Correction / Manual Upload Workflow */
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-700 mb-1">
-                      Upload Revised Creative Graphic (Designer Revision)
-                    </label>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      onChange={(e) => setUploadedRevisedFile(e.target.files?.[0] || null)}
-                      className="w-full text-xs text-gray-700 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-teal-50 file:text-teal-800 hover:file:bg-teal-100"
-                    />
-                    <span className="text-[10px] text-gray-500 mt-0.5 block">
-                      Upload an updated creative file if revisions were made in Figma, Illustrator, or Photoshop.
-                    </span>
-                  </div>
+            <div className="border-t border-gray-100 pt-3">
+              <span className="text-[11px] font-semibold text-gray-700 block mb-1">
+                Or apply Inpainting Overlay to current creative graphic:
+              </span>
+              <input
+                type="text"
+                value={newReplacementText}
+                onChange={(e) => setNewReplacementText(e.target.value)}
+                placeholder="Text banner overlay for creative graphic..."
+                className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 focus:outline-none focus:border-teal-700"
+              />
+            </div>
 
-                  <div className="border-t border-gray-100 pt-3">
-                    <span className="text-[11px] font-semibold text-gray-700 block mb-1">
-                      Or apply Inpainting Overlay to current creative:
-                    </span>
-                    <input
-                      type="text"
-                      value={newReplacementText}
-                      onChange={(e) => setNewReplacementText(e.target.value)}
-                      placeholder="Text banner overlay for creative graphic..."
-                      className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 focus:outline-none focus:border-teal-700"
-                    />
-                  </div>
-
-                  {authorizedAssets.length > 0 && (
-                    <div>
-                      <label className="block text-xs font-semibold text-gray-700 mb-1">
-                        Replace with Authorized Brand Asset (Optional)
-                      </label>
-                      <select
-                        value={selectedReplacementAssetId}
-                        onChange={(e) => setSelectedReplacementAssetId(e.target.value)}
-                        className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 focus:outline-none focus:border-teal-700"
-                      >
-                        <option value="">(Keep existing visual assets)</option>
-                        {authorizedAssets.map((asset) => (
-                          <option key={asset.id} value={asset.id}>
-                            {asset.asset_name} ({asset.asset_type})
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div className="p-3 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-600 space-y-1">
-                <p className="font-semibold text-gray-800">Governance & Audit Telemetry:</p>
-                <ul className="list-disc list-inside space-y-0.5 text-[11px] text-gray-600">
-                  <li>Original Version 1 is permanently retained in audit history for side-by-side comparison.</li>
-                  <li>A genuine Version {(review.review_version || 1) + 1} is generated with full re-evaluation.</li>
-                  <li>Unresolved issues remain visible and the creative is not automatically approved.</li>
-                </ul>
-              </div>
-
-              <div className="pt-3 border-t border-gray-100 flex items-center justify-end gap-2">
-                <Button type="button" variant="ghost" size="sm" onClick={() => setIsCorrectionModalOpen(false)}>
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  variant="primary"
-                  size="sm"
-                  isLoading={isApplyingCorrection}
-                  leftIcon={<Wand2 className="w-4 h-4" />}
+            {authorizedAssets.length > 0 && (
+              <div>
+                <label className="block text-xs font-semibold text-gray-700 mb-1">
+                  Replace with Authorized Brand Asset (Optional)
+                </label>
+                <select
+                  value={selectedReplacementAssetId}
+                  onChange={(e) => setSelectedReplacementAssetId(e.target.value)}
+                  className="w-full bg-white border border-gray-300 rounded-lg px-3 py-2 text-xs text-gray-900 focus:outline-none focus:border-teal-700"
                 >
-                  {correctionMode === 'caption'
-                    ? `Apply Caption Fix & Re-evaluate v${(review.review_version || 1) + 1}`
-                    : `Apply Image Graphic & Re-evaluate v${(review.review_version || 1) + 1}`}
-                </Button>
+                  <option value="">(Keep existing visual assets)</option>
+                  {authorizedAssets.map((asset) => (
+                    <option key={asset.id} value={asset.id}>
+                      {asset.asset_name} ({asset.asset_type})
+                    </option>
+                  ))}
+                </select>
               </div>
-            </form>
-          );
-        })()}
+            )}
+          </div>
+
+          <div className="p-3 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-600 space-y-1">
+            <p className="font-semibold text-gray-800">Governance & Audit Telemetry:</p>
+            <ul className="list-disc list-inside space-y-0.5 text-[11px] text-gray-600">
+              <li>Original Version 1 is permanently retained in audit history for side-by-side comparison.</li>
+              <li>A genuine Version {(review.review_version || 1) + 1} is generated with full re-evaluation.</li>
+              <li>Unresolved issues remain visible and the creative is not automatically approved.</li>
+            </ul>
+          </div>
+
+          <div className="pt-3 border-t border-gray-100 flex items-center justify-end gap-2">
+            <Button type="button" variant="ghost" size="sm" onClick={() => setIsCorrectionModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              isLoading={isApplyingCorrection}
+              leftIcon={<Wand2 className="w-4 h-4" />}
+            >
+              Apply Graphic Revision & Re-evaluate v{(review.review_version || 1) + 1}
+            </Button>
+          </div>
+        </form>
       </Modal>
     </div>
   );

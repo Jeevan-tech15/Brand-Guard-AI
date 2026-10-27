@@ -43,7 +43,6 @@ export async function POST(
       {
         skipAI: body.skipAI,
         imageUrl: review.image_url || undefined,
-        captionText: review.caption_text || undefined,
         assets,
         ocrReferenceText: body.ocrReferenceText || undefined,
       }

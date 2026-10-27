@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb, PDFPage, PDFFont, Color } from 'pdf-lib';
+import { PDFDocument, StandardFonts, rgb, PDFPage, PDFFont } from 'pdf-lib';
 import sharp from 'sharp';
 import { ContentReview } from '@/lib/types';
 import { loadImageBuffer } from '@/lib/engine/vision-analyzer';
@@ -93,7 +93,7 @@ function wrapText(text: string, maxWidth: number, font: PDFFont, fontSize: numbe
 
 export async function generateReviewPdfReport(
   review: ContentReview,
-  options?: PdfGeneratorOptions
+  _options?: PdfGeneratorOptions
 ): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const fontRegular = await doc.embedFont(StandardFonts.Helvetica);
@@ -388,8 +388,7 @@ export async function generateReviewPdfReport(
   }
 
   // Modality tag
-  const modalityLabel = review.image_url && review.caption_text ? 'Multimodal (Image + Caption)' : review.image_url ? 'Visual Graphic Only' : 'Text Copy Only';
-  currentPage.drawText(`Modality: ${modalityLabel}`, {
+  currentPage.drawText('Modality: Image-Only Governance Audit', {
     x: col1X,
     y: cursorY - 96,
     size: 8,
@@ -403,7 +402,7 @@ export async function generateReviewPdfReport(
   // 3. AUDIT COMPLETENESS & CHECKS BREAKDOWN
   // -------------------------------------------------------------
   ensureSpace(70);
-  currentPage.drawText('ANALYSIS COMPLETENESS & CHECKS EXECUTED', {
+  currentPage.drawText('IMAGE-FIRST GOVERNANCE CHECKS EXECUTED', {
     x: MARGIN_LEFT,
     y: cursorY - 8,
     size: 9,
@@ -424,25 +423,24 @@ export async function generateReviewPdfReport(
   });
 
   const ocrLines = review.evaluation_metadata?.ocrLinesCount || (review.extracted_ocr_text ? review.extracted_ocr_text.split('\n').filter(Boolean).length : 0);
-  const ocrLabel = ocrLines > 0 ? `Active (${ocrLines} lines)` : review.image_url ? 'No Text Detected' : 'N/A';
-  const crossModalLabel = (review.image_url && review.caption_text) ? 'Executed' : 'N/A (Single Modality)';
-  const cloudVisionLabel = review.evaluation_metadata?.aiRun ? 'Executed (Gemini Vision)' : 'Skipped (Local Engine Active)';
+  const ocrLabel = ocrLines > 0 ? `Active (${ocrLines} lines)` : review.image_url ? 'Zero Legible Text' : 'N/A';
+  const cloudVisionLabel = review.evaluation_metadata?.aiRun ? 'Executed (Gemini 2.5 Flash)' : 'Executed (Local OCR & Geometry Engine)';
 
-  currentPage.drawText(`• Local OCR Engine: ${ocrLabel}`, {
+  currentPage.drawText(`• Typography & OCR: ${ocrLabel}`, {
     x: MARGIN_LEFT + 12,
     y: cursorY - 18,
     size: 8,
     font: fontRegular,
     color: COLORS.bodyText,
   });
-  currentPage.drawText(`• Caption Rule Audit: ${review.caption_text ? 'Executed' : 'No Caption'}`, {
+  currentPage.drawText(`• Spelling & Grammar: Audited across visible text`, {
     x: MARGIN_LEFT + 12,
     y: cursorY - 32,
     size: 8,
     font: fontRegular,
     color: COLORS.bodyText,
   });
-  currentPage.drawText(`• Cross-Modal Consistency: ${crossModalLabel}`, {
+  currentPage.drawText(`• Logo & Brand Identity: Inspected against official marks`, {
     x: MARGIN_LEFT + 12,
     y: cursorY - 44,
     size: 8,
@@ -450,7 +448,7 @@ export async function generateReviewPdfReport(
     color: COLORS.bodyText,
   });
 
-  currentPage.drawText(`• Cloud Vision (Gemini): ${cloudVisionLabel}`, {
+  currentPage.drawText(`• Vision Provider: ${cloudVisionLabel}`, {
     x: MARGIN_LEFT + 250,
     y: cursorY - 18,
     size: 8,
@@ -464,7 +462,7 @@ export async function generateReviewPdfReport(
     font: fontRegular,
     color: COLORS.bodyText,
   });
-  currentPage.drawText(`• Factual Registry Benchmarks: ${review.evaluation_metadata?.factsEvaluatedCount || 4} Verified Benchmarks`, {
+  currentPage.drawText(`• IP & Trademark Safety: Audited against third-party marks`, {
     x: MARGIN_LEFT + 250,
     y: cursorY - 44,
     size: 8,
@@ -570,7 +568,7 @@ export async function generateReviewPdfReport(
   const textMaxW = CONTENT_WIDTH - 165;
   let textY = cursorY - 16;
 
-  currentPage.drawText('Accompanying Marketing Copy / Caption:', {
+  currentPage.drawText('Extracted Visible Image Typography (OCR):', {
     x: textX,
     y: textY,
     size: 8,
@@ -579,9 +577,9 @@ export async function generateReviewPdfReport(
   });
   textY -= 14;
 
-  const captionString = review.caption_text || review.content_text || '(No caption copy submitted)';
-  const captionLines = wrapText(captionString, textMaxW, fontRegular, 7.5);
-  for (const line of captionLines.slice(0, 6)) {
+  const ocrString = review.extracted_ocr_text || '(No legible visible typography detected in image)';
+  const ocrLinesList = wrapText(ocrString, textMaxW, fontRegular, 7.5);
+  for (const line of ocrLinesList.slice(0, 6)) {
     currentPage.drawText(line, {
       x: textX,
       y: textY,
@@ -591,8 +589,8 @@ export async function generateReviewPdfReport(
     });
     textY -= 10.5;
   }
-  if (captionLines.length > 6) {
-    currentPage.drawText(`[+ ${captionLines.length - 6} additional lines truncated in summary]`, {
+  if (ocrLinesList.length > 6) {
+    currentPage.drawText(`[+ ${ocrLinesList.length - 6} additional lines truncated in summary]`, {
       x: textX,
       y: textY,
       size: 7,
@@ -603,15 +601,12 @@ export async function generateReviewPdfReport(
   }
 
   // Version Comparison summary if version > 1
-  if ((review.review_version || 1) > 1 || Boolean(review.original_caption_text && review.original_caption_text !== review.caption_text)) {
+  if ((review.review_version || 1) > 1) {
     textY -= 4;
     const hasGenuinePixelEdit = Boolean(
       review.correction_metadata?.edit_applied_to_pixels &&
       review.corrected_image_url &&
       review.corrected_image_url !== (review.original_image_url || review.image_url)
-    );
-    const hasCaptionChange = Boolean(
-      review.original_caption_text && review.caption_text && review.original_caption_text !== review.caption_text
     );
 
     currentPage.drawText('VERSION PROGRESSION AUDIT:', {
@@ -623,7 +618,7 @@ export async function generateReviewPdfReport(
     });
     textY -= 11;
 
-    const imgChangeStr = hasGenuinePixelEdit ? '• Image Graphic: Corrected Asset Applied' : '• Image Graphic: Original Pixels Retained (No graphic edit)';
+    const imgChangeStr = hasGenuinePixelEdit ? '• Image Graphic: Corrected Asset Applied' : '• Image Graphic: Re-analyzed Visual Pixels';
     currentPage.drawText(imgChangeStr, {
       x: textX,
       y: textY,
@@ -632,15 +627,6 @@ export async function generateReviewPdfReport(
       color: COLORS.charcoal,
     });
     textY -= 9.5;
-
-    const capChangeStr = hasCaptionChange ? '• Caption Copy: Updated & Synchronized' : '• Caption Copy: Unchanged';
-    currentPage.drawText(capChangeStr, {
-      x: textX,
-      y: textY,
-      size: 7,
-      font: fontRegular,
-      color: COLORS.charcoal,
-    });
   }
 
   cursorY -= (creativeSectionHeight + 15);

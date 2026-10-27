@@ -1,5 +1,6 @@
 import { getSupabaseServerClient, getServerDbConfigStatus } from '@/lib/supabase/server';
 import {
+  BrandProfile,
   BrandGuideline,
   ApprovedFact,
   AuthorizedAsset,
@@ -26,6 +27,7 @@ import path from 'path';
 // Local File-Based Fallback Store
 // -------------------------------------------------------------------
 interface LocalStoreSchema {
+  brand_profile?: BrandProfile | null;
   brand_guidelines: BrandGuideline[];
   approved_facts: ApprovedFact[];
   authorized_assets: AuthorizedAsset[];
@@ -39,6 +41,7 @@ const DATA_FILE = path.join(DATA_DIR, 'db.json');
 
 function getInitialStore(): LocalStoreSchema {
   return {
+    brand_profile: null,
     brand_guidelines: [],
     approved_facts: [],
     authorized_assets: [],
@@ -76,6 +79,107 @@ function writeLocalStore(store: LocalStoreSchema): void {
   } catch (err) {
     console.error('Failed to write local store:', err);
   }
+}
+
+// -------------------------------------------------------------------
+// 0. Brand Profile (Unified Identity Governance)
+// -------------------------------------------------------------------
+export async function getBrandProfile(): Promise<BrandProfile | null> {
+  const config = getServerDbConfigStatus();
+  if (config.isConfigured) {
+    const supabase = getSupabaseServerClient();
+    if (supabase) {
+      try {
+        const { data, error } = await supabase.from('brand_profiles').select('*').limit(1).maybeSingle();
+        if (!error && data) {
+          return {
+            id: data.id,
+            brand_name: data.brand_name || '',
+            brand_description: data.brand_description || '',
+            brand_colors: Array.isArray(data.brand_colors) ? data.brand_colors : [],
+            typography_preferences: typeof data.typography_preferences === 'string'
+              ? (data.typography_preferences.startsWith('{') ? JSON.parse(data.typography_preferences) : { primary_font: data.typography_preferences })
+              : (data.typography_preferences || {}),
+            official_logo_url: data.official_logo_url || undefined,
+            tone_of_voice: data.tone_of_voice || '',
+            prohibited_phrases: Array.isArray(data.prohibited_phrases) ? data.prohibited_phrases : [],
+            required_disclaimers: Array.isArray(data.required_disclaimers) ? data.required_disclaimers : [],
+            additional_rules: data.additional_rules || '',
+            updated_at: data.updated_at,
+          };
+        }
+      } catch {
+        // Fall back to local store
+      }
+    }
+  }
+
+  const store = readLocalStore();
+  return store.brand_profile || null;
+}
+
+export async function saveBrandProfile(payload: Partial<BrandProfile>): Promise<BrandProfile> {
+  const config = getServerDbConfigStatus();
+  const now = new Date().toISOString();
+  const store = readLocalStore();
+  const existing = store.brand_profile || null;
+
+  const updatedProfile: BrandProfile = {
+    id: existing?.id || crypto.randomUUID(),
+    brand_name: payload.brand_name !== undefined ? payload.brand_name.trim() : (existing?.brand_name || ''),
+    brand_description: payload.brand_description !== undefined ? payload.brand_description.trim() : (existing?.brand_description || ''),
+    brand_colors: payload.brand_colors !== undefined ? payload.brand_colors : (existing?.brand_colors || []),
+    typography_preferences: payload.typography_preferences !== undefined ? payload.typography_preferences : (existing?.typography_preferences || {}),
+    official_logo_url: payload.official_logo_url !== undefined ? payload.official_logo_url : (existing?.official_logo_url || undefined),
+    tone_of_voice: payload.tone_of_voice !== undefined ? payload.tone_of_voice.trim() : (existing?.tone_of_voice || ''),
+    prohibited_phrases: payload.prohibited_phrases !== undefined ? payload.prohibited_phrases : (existing?.prohibited_phrases || []),
+    required_disclaimers: payload.required_disclaimers !== undefined ? payload.required_disclaimers : (existing?.required_disclaimers || []),
+    additional_rules: payload.additional_rules !== undefined ? (typeof payload.additional_rules === 'string' ? payload.additional_rules.trim() : payload.additional_rules) : (existing?.additional_rules || ''),
+    updated_at: now,
+  };
+
+  store.brand_profile = updatedProfile;
+  writeLocalStore(store);
+
+  if (config.isConfigured) {
+    const supabase = getSupabaseServerClient();
+    if (supabase) {
+      try {
+        const { data: existingRecords } = await supabase.from('brand_profiles').select('id').limit(1);
+        if (existingRecords && existingRecords.length > 0) {
+          await supabase.from('brand_profiles').update({
+            brand_name: updatedProfile.brand_name,
+            brand_description: updatedProfile.brand_description,
+            brand_colors: updatedProfile.brand_colors,
+            typography_preferences: JSON.stringify(updatedProfile.typography_preferences || {}),
+            official_logo_url: updatedProfile.official_logo_url,
+            tone_of_voice: updatedProfile.tone_of_voice,
+            prohibited_phrases: updatedProfile.prohibited_phrases,
+            required_disclaimers: updatedProfile.required_disclaimers,
+            updated_at: now,
+          }).eq('id', existingRecords[0].id);
+        } else {
+          await supabase.from('brand_profiles').insert({
+            id: updatedProfile.id,
+            brand_name: updatedProfile.brand_name,
+            brand_description: updatedProfile.brand_description,
+            brand_colors: updatedProfile.brand_colors,
+            typography_preferences: JSON.stringify(updatedProfile.typography_preferences || {}),
+            official_logo_url: updatedProfile.official_logo_url,
+            tone_of_voice: updatedProfile.tone_of_voice,
+            prohibited_phrases: updatedProfile.prohibited_phrases,
+            required_disclaimers: updatedProfile.required_disclaimers,
+            created_at: now,
+            updated_at: now,
+          });
+        }
+      } catch {
+        // Continue with local store
+      }
+    }
+  }
+
+  return updatedProfile;
 }
 
 // -------------------------------------------------------------------
@@ -534,7 +638,7 @@ export async function getContentReviews(filters?: {
             compliance_score: finalScore,
             original_image_url: r.original_image_url || local?.original_image_url || r.image_url || local?.image_url || null,
             original_caption_text: r.original_caption_text || local?.original_caption_text || r.caption_text || local?.caption_text || null,
-            image_url: r.image_url || local?.image_url || null,
+            image_url: r.image_url || local?.image_url || '',
             caption_text: r.caption_text || local?.caption_text || null,
             aspect_ratio: r.aspect_ratio || local?.aspect_ratio || null,
             extracted_ocr_text: r.extracted_ocr_text || (isSameImage ? local?.extracted_ocr_text : null) || null,
@@ -636,7 +740,7 @@ export async function getContentReviewById(id: string): Promise<ContentReview | 
           compliance_score: finalScore,
           original_image_url: r.original_image_url || local?.original_image_url || r.image_url || local?.image_url || null,
           original_caption_text: r.original_caption_text || local?.original_caption_text || r.caption_text || local?.caption_text || null,
-          image_url: r.image_url || local?.image_url || null,
+          image_url: r.image_url || local?.image_url || '',
           caption_text: r.caption_text || local?.caption_text || null,
           aspect_ratio: r.aspect_ratio || local?.aspect_ratio || null,
           extracted_ocr_text: r.extracted_ocr_text || (isSameImage ? local?.extracted_ocr_text : null) || null,
@@ -676,6 +780,130 @@ export async function getContentReviewById(id: string): Promise<ContentReview | 
   };
 }
 
+// Helper to merge brand guidelines, facts, assets, and active brand profile rules
+export async function getAugmentedActiveGuidelinesAndAssets() {
+  const [baseGuidelines, facts, baseAssets, profile] = await Promise.all([
+    getBrandGuidelines(true),
+    getApprovedFacts(true),
+    getAuthorizedAssets(true),
+    getBrandProfile(),
+  ]);
+
+  const guidelines = [...baseGuidelines];
+  const assets = [...baseAssets];
+
+  if (profile) {
+    if (profile.prohibited_phrases && profile.prohibited_phrases.length > 0) {
+      guidelines.push({
+        id: 'profile-prohibited-phrases',
+        title: `Prohibited Terms for ${profile.brand_name || 'Brand'}`,
+        description: 'Marketing creatives must not include unapproved or prohibited phrases.',
+        rule_type: 'prohibited_claim',
+        severity: 'high',
+        rule_configuration: {
+          keywords: profile.prohibited_phrases,
+          forbidden_examples: profile.prohibited_phrases,
+        },
+        is_active: true,
+        created_at: profile.updated_at || new Date().toISOString(),
+        updated_at: profile.updated_at || new Date().toISOString(),
+      });
+    }
+
+    if (profile.required_disclaimers && profile.required_disclaimers.length > 0) {
+      guidelines.push({
+        id: 'profile-required-disclaimers',
+        title: `Mandatory Brand Disclaimers for ${profile.brand_name || 'Brand'}`,
+        description: 'Marketing creatives must include official legal/regulatory copy.',
+        rule_type: 'required_disclaimer',
+        severity: 'medium',
+        rule_configuration: {
+          keywords: profile.required_disclaimers,
+          allowed_examples: profile.required_disclaimers,
+        },
+        is_active: true,
+        created_at: profile.updated_at || new Date().toISOString(),
+        updated_at: profile.updated_at || new Date().toISOString(),
+      });
+    }
+
+    if (profile.brand_colors && profile.brand_colors.length > 0) {
+      guidelines.push({
+        id: 'profile-brand-colors',
+        title: `Official Color Palette for ${profile.brand_name || 'Brand'}`,
+        description: `Adhere strictly to official brand palette colors: ${profile.brand_colors.join(', ')}`,
+        rule_type: 'color_palette',
+        severity: 'medium',
+        rule_configuration: {
+          allowed_examples: profile.brand_colors,
+        },
+        is_active: true,
+        created_at: profile.updated_at || new Date().toISOString(),
+        updated_at: profile.updated_at || new Date().toISOString(),
+      });
+    }
+
+    const typoObj = typeof profile.typography_preferences === 'object' && profile.typography_preferences !== null
+      ? (profile.typography_preferences as { primary_font?: string; secondary_font?: string })
+      : typeof profile.typography_preferences === 'string'
+      ? { primary_font: profile.typography_preferences, secondary_font: undefined }
+      : {};
+
+    if (typoObj?.primary_font) {
+      guidelines.push({
+        id: 'profile-typography',
+        title: `Brand Typography for ${profile.brand_name || 'Brand'}`,
+        description: `Use approved primary typeface: ${typoObj.primary_font}${typoObj.secondary_font ? ` and secondary typeface: ${typoObj.secondary_font}` : ''}`,
+        rule_type: 'typography',
+        severity: 'low',
+        rule_configuration: {
+          allowed_examples: [typoObj.primary_font, typoObj.secondary_font].filter(Boolean) as string[],
+        },
+        is_active: true,
+        created_at: profile.updated_at || new Date().toISOString(),
+        updated_at: profile.updated_at || new Date().toISOString(),
+      });
+    }
+
+    if (profile.additional_rules) {
+      const customRulesText = typeof profile.additional_rules === 'string'
+        ? profile.additional_rules.trim()
+        : Array.isArray(profile.additional_rules)
+        ? profile.additional_rules.map((r) => r.description || r.title).join('; ')
+        : '';
+
+      if (customRulesText) {
+        guidelines.push({
+          id: 'profile-custom-rules',
+          title: `Custom Governance Standard for ${profile.brand_name || 'Brand'}`,
+          description: customRulesText,
+          rule_type: 'voice_and_tone',
+          severity: 'medium',
+          rule_configuration: {},
+          is_active: true,
+          created_at: profile.updated_at || new Date().toISOString(),
+          updated_at: profile.updated_at || new Date().toISOString(),
+        });
+      }
+    }
+
+    if (profile.official_logo_url && !assets.some((a) => a.asset_type === 'logo' && a.is_active)) {
+      assets.unshift({
+        id: 'profile-official-logo',
+        asset_name: `${profile.brand_name || 'Brand'} Official Logo`,
+        asset_type: 'logo',
+        file_url: profile.official_logo_url,
+        asset_metadata: { is_primary: true },
+        is_active: true,
+        created_at: profile.updated_at || new Date().toISOString(),
+        updated_at: profile.updated_at || new Date().toISOString(),
+      });
+    }
+  }
+
+  return { guidelines, facts, assets, profile };
+}
+
 export async function createContentReview(
   payload: CreateReviewPayload,
   options?: { skipEvaluation?: boolean; ocrReferenceText?: string }
@@ -687,7 +915,7 @@ export async function createContentReview(
   const initialStatus: ReviewStatus = isDraft ? 'draft' : 'in_review';
   const shouldSkipEvaluation = isDraft || Boolean(options?.skipEvaluation);
 
-  const rawCopy = payload.content_text?.trim() || payload.caption_text?.trim() || (payload.image_url ? `[Marketing Post Image: ${payload.image_url}]` : '');
+  const rawCopy = payload.content_text?.trim() || (payload.image_url ? `[Marketing Post Image: ${payload.image_url}]` : '');
 
   // Persist locally first for complete image data guarantee
   const store = readLocalStore();
@@ -701,10 +929,10 @@ export async function createContentReview(
     status: initialStatus,
     compliance_score: null,
     review_version: 1,
-    image_url: payload.image_url || null,
+    image_url: payload.image_url || '',
     original_image_url: payload.image_url || null,
-    caption_text: payload.caption_text?.trim() || null,
-    original_caption_text: payload.caption_text?.trim() || rawCopy || null,
+    caption_text: null,
+    original_caption_text: null,
     aspect_ratio: payload.aspect_ratio || null,
     image_width: payload.image_width || null,
     image_height: payload.image_height || null,
@@ -722,7 +950,6 @@ export async function createContentReview(
   if (config.isConfigured) {
     const supabase = getSupabaseServerClient();
     if (supabase) {
-      // Try full insert with image columns
       const fullInsert = {
         id: createdReviewId,
         title: payload.title.trim(),
@@ -732,7 +959,6 @@ export async function createContentReview(
         compliance_score: null,
         review_version: 1,
         image_url: payload.image_url || null,
-        caption_text: payload.caption_text?.trim() || null,
         aspect_ratio: payload.aspect_ratio || null,
         image_width: payload.image_width || null,
         image_height: payload.image_height || null,
@@ -743,7 +969,6 @@ export async function createContentReview(
       const { data, error } = await supabase.from('content_reviews').insert(fullInsert).select().single();
 
       if (error) {
-        // Fallback: if remote table does not yet have image_url column, insert core columns
         const baseInsert = {
           id: createdReviewId,
           title: payload.title.trim(),
@@ -762,13 +987,9 @@ export async function createContentReview(
     }
   }
 
-  // If evaluation requested, evaluate against active guidelines, facts, and authorized visual assets
+  // If evaluation requested, evaluate against active guidelines, facts, brand profile, and authorized visual assets
   if (!shouldSkipEvaluation) {
-    const [guidelines, facts, assets] = await Promise.all([
-      getBrandGuidelines(true),
-      getApprovedFacts(true),
-      getAuthorizedAssets(true),
-    ]);
+    const { guidelines, facts, assets } = await getAugmentedActiveGuidelinesAndAssets();
 
     const evalResult = await runComplianceReview(
       rawCopy,
@@ -777,7 +998,6 @@ export async function createContentReview(
       facts,
       {
         imageUrl: payload.image_url,
-        captionText: payload.caption_text,
         assets,
         ocrReferenceText: options?.ocrReferenceText,
       }
@@ -813,7 +1033,7 @@ export async function saveReviewEvaluation(
       status: result.status,
       compliance_score: result.compliance_score,
       review_version: 1,
-      image_url: null,
+      image_url: '',
       created_at: now,
       updated_at: now,
       findings: [],
@@ -1027,12 +1247,8 @@ export async function updateContentReviewVersion(
     }
   }
 
-  // 3. Rerun compliance evaluation against current active guidelines, facts, and authorized visual assets
-  const [guidelines, facts, assets] = await Promise.all([
-    getBrandGuidelines(true),
-    getApprovedFacts(true),
-    getAuthorizedAssets(true),
-  ]);
+  // 3. Rerun compliance evaluation against current active guidelines, facts, brand profile, and authorized visual assets
+  const { guidelines, facts, assets } = await getAugmentedActiveGuidelinesAndAssets();
 
   const evalResult = await runComplianceReview(
     updatedText,
@@ -1041,7 +1257,6 @@ export async function updateContentReviewVersion(
     facts,
     {
       imageUrl: updatedImageUrl || undefined,
-      captionText: updatedCaption || undefined,
       assets,
     }
   );
@@ -1051,19 +1266,16 @@ export async function updateContentReviewVersion(
 }
 
 // -------------------------------------------------------------------
-// 7. Image Pixel Correction & Reanalysis Workflow (Requirements 4 & 5)
+// 7. Image Pixel Correction & Reanalysis Workflow
 // -------------------------------------------------------------------
 export async function reanalyzeCorrectedImage(
   reviewId: string,
   params: {
     correctedImageUrl?: string;
-    updatedCaptionText?: string;
     correctionMetadata?: {
       replaced_text?: string;
       new_text?: string;
-      target_scope?: 'caption' | 'image' | 'both';
-      caption_before?: string;
-      caption_after?: string;
+      target_scope?: 'image' | 'caption' | string;
       replaced_asset_id?: string;
       edit_applied_to_pixels?: boolean;
       correction_notes?: string;
@@ -1085,30 +1297,6 @@ export async function reanalyzeCorrectedImage(
   const meta = params.correctionMetadata;
   const isPixelEdit = Boolean(meta?.edit_applied_to_pixels && params.correctedImageUrl);
 
-  // Compute updated copy safely preserving all unrelated sentences, hashtags, and formatting
-  let updatedCopy = (existing.caption_text || existing.content_text || '').trim();
-
-  if (params.updatedCaptionText && params.updatedCaptionText.trim()) {
-    // Explicit revised caption passed directly
-    updatedCopy = params.updatedCaptionText.trim();
-  } else if (meta?.replaced_text && meta?.new_text !== undefined) {
-    const target = meta.replaced_text.trim();
-    const replacement = meta.new_text.trim();
-    const lowerCopy = updatedCopy.toLowerCase();
-    const targetLower = target.toLowerCase();
-    const matchIdx = lowerCopy.indexOf(targetLower);
-
-    if (matchIdx !== -1) {
-      // Exact targeted replacement in caption, preserving all other sentences and hashtags
-      updatedCopy = updatedCopy.slice(0, matchIdx) + replacement + updatedCopy.slice(matchIdx + target.length);
-    } else {
-      // Target snippet was not found in caption
-      if (!isPixelEdit) {
-        throw new Error(`Target text "${target}" was not found in the caption. Original review was preserved.`);
-      }
-    }
-  }
-
   // Determine active image URL
   const newImageUrl = params.correctedImageUrl?.trim()
     ? params.correctedImageUrl.trim()
@@ -1117,20 +1305,16 @@ export async function reanalyzeCorrectedImage(
   // Update review to Version 2 (or N+1) with preserved original fields and genuine re-evaluation
   const updated = await updateContentReviewVersion(reviewId, {
     title: existing.title,
-    content_text: updatedCopy,
-    caption_text: updatedCopy,
+    content_text: `[Marketing Post Image: ${newImageUrl}]`,
     content_type: existing.content_type,
     image_url: newImageUrl,
     corrected_image_url: params.correctedImageUrl || undefined,
     original_image_url: existing.original_image_url || existing.image_url || undefined,
-    original_caption_text: existing.original_caption_text || existing.caption_text || existing.content_text || undefined,
     correction_metadata: {
       ...(meta || {}),
-      target_scope: meta?.target_scope || (isPixelEdit ? 'image' : 'caption'),
+      target_scope: 'image',
       edit_applied_to_pixels: isPixelEdit,
-      caption_before: existing.caption_text || existing.content_text,
-      caption_after: updatedCopy,
-      correction_notes: meta?.correction_notes || `Applied fix: "${meta?.replaced_text || ''}" -> "${meta?.new_text || ''}"`,
+      correction_notes: meta?.correction_notes || `Applied visual fix to creative pixels.`,
     },
   });
 

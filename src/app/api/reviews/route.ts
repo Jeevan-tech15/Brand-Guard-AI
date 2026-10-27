@@ -41,12 +41,10 @@ export async function POST(req: NextRequest) {
     }
 
     const hasImage = Boolean(body.image_url && body.image_url.trim());
-    const hasText = Boolean(body.content_text && body.content_text.trim());
-    const hasCaption = Boolean(body.caption_text && body.caption_text.trim());
 
-    if (!hasImage && !hasText && !hasCaption) {
+    if (!hasImage) {
       return NextResponse.json(
-        { error: 'Please provide either a marketing creative image or marketing copy to review.' },
+        { error: 'Please upload a marketing creative image to review. BrandGuard operates in image-only analysis mode.' },
         { status: 400 }
       );
     }
@@ -57,8 +55,7 @@ export async function POST(req: NextRequest) {
 
     const review = await createContentReview({
       title: body.title.trim(),
-      content_text: body.content_text?.trim() || body.caption_text?.trim() || (body.image_url ? `[Image Creative: ${body.image_url}]` : ''),
-      caption_text: body.caption_text?.trim(),
+      content_text: body.content_text?.trim() || `[Image Creative: ${body.image_url}]`,
       content_type: body.content_type,
       image_url: body.image_url,
       aspect_ratio: body.aspect_ratio,

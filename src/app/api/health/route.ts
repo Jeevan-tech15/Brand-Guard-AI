@@ -9,7 +9,7 @@ export async function GET() {
   let databaseLatencyMs: number | undefined;
   let dbError: string | null = null;
 
-  let storageStatus = {
+  const storageStatus = {
     creativesBucketReachable: false,
     assetsBucketReachable: false,
     serviceRoleActive: Boolean(configStatus.hasServiceKey),

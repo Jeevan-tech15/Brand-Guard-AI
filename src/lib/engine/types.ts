@@ -1,23 +1,24 @@
-import { RuleSeverity, ReviewStatus, BoundingBox, ImageSummaryStats } from '@/lib/types';
+import { RuleSeverity, ReviewStatus, BoundingBox, ImageSummaryStats, FindingCategory } from '@/lib/types';
 
 export interface EngineFinding {
-  category: string;
+  category: FindingCategory;
   severity: RuleSeverity;
   finding_title: string;
   explanation: string;
   evidence_text?: string;
+  location_description?: string;
   guideline_id?: string | null;
   fact_id?: string | null;
   asset_id?: string | null;
   confidence: number;
   suggested_fix?: string;
-  source: 'deterministic_rule' | 'fact_check' | 'ai_evaluator' | 'vision_model' | 'cross_modal' | 'image' | 'caption' | 'rule';
+  source: 'vision_model' | 'ocr_analysis' | 'deterministic_rule' | 'fact_check' | 'image' | 'rule' | 'ai_evaluator' | 'cross_modal' | string;
   verification_status?: 'supported' | 'contradicted' | 'unverified' | 'confirmed_violation' | 'possible_inconsistency' | 'unverifiable';
   bounding_box?: BoundingBox | null;
   target_type?: 'text' | 'visual_element' | 'logo' | 'color' | 'layout';
-  target_scope?: 'caption' | 'image' | 'both';
-  caption_evidence?: string | null;
+  target_scope?: 'image' | 'caption' | 'both';
   image_evidence?: string | null;
+  caption_evidence?: string | null;
   proposed_replacement?: string | null;
   resolution_status?: 'unresolved' | 'resolved' | 'overridden';
   needs_human_verification?: boolean;
@@ -61,18 +62,17 @@ export interface EngineMetadata {
   limitationsDisclosed?: string;
   disclosures?: string[];
   imageSummary?: ImageSummaryStats | null;
-  modality?: 'multimodal' | 'image_only' | 'text_only';
-  checksCompleted?: {
-    imageAnalysis: boolean;
-    captionAnalysis: boolean;
-    crossModalComparison: boolean;
-    guidelineChecks: boolean;
-    factChecks: boolean;
-  };
+  modality?: 'image_only';
+  checksCompleted?: Record<string, boolean>;
   checksStatus?: {
     imageInspection: 'passed' | 'failed' | 'unavailable';
     typographyExtraction: 'passed' | 'failed' | 'unavailable';
-    crossModal: 'passed' | 'failed' | 'unavailable';
+    spellingAndGrammar: 'passed' | 'failed' | 'unavailable';
+    logoAndBrandIdentity: 'passed' | 'failed' | 'unavailable';
+    abusiveLanguage: 'passed' | 'failed' | 'unavailable';
+    layoutAndDesign: 'passed' | 'failed' | 'unavailable';
+    claimsAndConsistency: 'passed' | 'failed' | 'unavailable';
+    copyrightAndIp: 'passed' | 'failed' | 'unavailable';
     brandGuidelines: 'passed' | 'failed' | 'unavailable';
     factVerification: 'passed' | 'failed' | 'unavailable';
     cloudVision: 'passed' | 'failed' | 'unavailable';
@@ -94,4 +94,3 @@ export interface ComplianceReviewResult {
   metadata: EngineMetadata;
   extracted_ocr_text?: string;
 }
-

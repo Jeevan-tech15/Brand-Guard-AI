@@ -1,10 +1,12 @@
-import { BrandGuideline, ApprovedFact, AuthorizedAsset, RuleSeverity, BoundingBox, ImageSummaryStats } from '@/lib/types';
+import { BrandGuideline, ApprovedFact, AuthorizedAsset, RuleSeverity, BoundingBox, ImageSummaryStats, FindingCategory } from '@/lib/types';
 import { EngineFinding } from './types';
 import {
   auditImageTextAndTypography,
+  auditImageLogoAndBrandIdentity,
+  auditImageAbusiveOrHarmfulLanguage,
   auditImageVisualAndDesignQuality,
-  auditImageCopyrightAndIpRisks,
   auditImageBrandAndMarketingClaims,
+  auditImageCopyrightAndIpRisks,
 } from './image-first-analyzer';
 import fs from 'fs';
 import path from 'path';
@@ -28,11 +30,11 @@ export interface VisionAnalysisResult {
 
 export interface VisionAnalysisParams {
   imageUrl: string;
-  captionText?: string;
   guidelines: BrandGuideline[];
   facts: ApprovedFact[];
   assets: AuthorizedAsset[];
   ocrReferenceText?: string;
+  captionText?: string;
   timeoutMs?: number;
 }
 
@@ -50,7 +52,7 @@ interface LocalOcrResult {
  */
 export async function loadImageBuffer(imageUrl: string): Promise<{ buffer: Buffer; mimeType: string } | null> {
   try {
-    if (imageUrl.startsWith('/uploads/')) {
+    if (imageUrl.startsWith('/uploads/') || imageUrl.startsWith('uploads/')) {
       const cleanPath = imageUrl.startsWith('/') ? imageUrl.slice(1) : imageUrl;
       const fullPath = path.join(process.cwd(), 'public', cleanPath);
       if (fs.existsSync(fullPath)) {
@@ -76,7 +78,7 @@ export async function loadImageBuffer(imageUrl: string): Promise<{ buffer: Buffe
     }
 
     if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
-      // 1. Check if the URL filename matches a local file in public/uploads (e.g. Supabase storage mirrors or local fallback)
+      // 1. Check local public upload mirrors
       try {
         const urlObj = new URL(imageUrl);
         const filename = path.basename(urlObj.pathname);
@@ -136,53 +138,31 @@ export async function loadImageBuffer(imageUrl: string): Promise<{ buffer: Buffe
 
 /**
  * Robust OCR text cleanup and normalization.
- * Handles common OCR character artifacts without hardcoding any brand-specific strings.
  */
 export function cleanAndNormalizeOcrText(rawOcr: string): string {
   if (!rawOcr) return '';
   return rawOcr
-    // Replace non-standard whitespace and control characters
     .replace(/[\u200B-\u200D\uFEFF]/g, '')
-    // Normalize smart quotes and dashes
     .replace(/[\u2018\u2019]/g, "'")
     .replace(/[\u201C\u201D]/g, '"')
     .replace(/[\u2013\u2014]/g, '-')
-    // Fix common OCR digit/letter confusion in percentage terms (e.g. 5O% -> 50%)
+    // Fix common OCR digit/letter confusion in percentage terms
     .replace(/\b(\d+)[Oo]\s*%/g, '$10%')
     .replace(/\b[Oo](\d+)\s*%/g, '0$1%')
-    // Fix common OCR percent ligature misreads where a 2-digit percentage (e.g. 70%, 50%, 80%) has the slash read as digit 7 or 1: e.g. 707% -> 70%
     .replace(/\b([1-9]\d)[71]\s*%/g, '$1%')
-    // Fix common OCR percent misreads where % is recognized as (), o/o, or 0/0 (e.g. 50 () -> 50%)
     .replace(/\b([1-9]\d(?:\.\d+)?)\s*(?:\(\)|o\/o|0\/0)\b/gi, '$1%')
-    // Fix split multi-line percentages and discount tokens:
-    // 1. Digit followed by line break then Yo / o/o / % / 0/0
     .replace(/\b([1-9]\d)\s*[\n\r]+\s*(?:Yo|o\/o|0\/0|%)\b/gi, '$1%')
-    // 2. Digit directly above OFF: e.g. "50 \n OFF" -> "50% OFF"
     .replace(/\b([1-9]\d)\s*[\n\r]+\s*(?:off|discount|sale)\b/gi, '$1% OFF')
-    // 3. Digit + Yo on same line: e.g. "50 Yo" -> "50%"
     .replace(/\b([1-9]\d)\s+(?:Yo|o\/o|0\/0)\b/gi, '$1%')
-    // Fix common OCR font artifacts on warranty/guarantee typography (e.g. wartouiu -> warranty)
     .replace(/\bwar[rt]?[aou][nmrui]{3,5}\b/gi, 'warranty')
-    // Fix common OCR digit/letter confusion where 'g' is misread as '9' in nutrition & mass metrics
-    // 1. Double character fusion e.g. 409g -> 40g
     .replace(/\b(\d+)9g\b/gi, '$1g')
-    // 2. Direct nutrition spec phrase e.g. 409 protein -> 40g protein
     .replace(/\b(\d+)9\s*(?:of\s+)?(protein|sugar|fat|fiber|carbs|carbohydrates|sodium|net\s+carbs)\b/gi, '$1g $2')
-    // 3. Across line breaks: 409 \n "ll Protein -> 40g \n Protein
     .replace(/\b(\d+)9\s*\n+\s*["'~\-•·*]?\s*(?:[a-z]{1,3}\s+)?(protein|sugar|fiber|fat|carbs)\b/gi, '$1g\n$2')
-    // 4. In packaging / snack bar context: e.g. '209' near 'PROTEEN BAR' or 'protein' -> '20g'
-    .replace(/\b([1-9]\d)9\b(?=[\s\S]{0,60}\b(?:protein|proteen|protean|nutrition|bar|snack)\b)/gi, '$1g')
-    .replace(/(\b(?:protein|proteen|protean|nutrition|bar|snack)\b[\s\S]{0,60}?)\b([1-9]\d)9\b/gi, '$1$2g')
-    // Remove isolated single-char OCR debris at start of lines (e.g. "~", "|", "^")
     .replace(/^[~|^•·*]+\s*/gm, '')
-    // Normalize excessive blank lines
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
-/**
- * Trims extraneous noisy punctuation from line edges without deleting valid grammar
- */
 function cleanLineSymbols(text: string): string {
   return text
     .replace(/^[^a-zA-Z0-9#$€£"'(]+/, '')
@@ -191,9 +171,6 @@ function cleanLineSymbols(text: string): string {
     .trim();
 }
 
-/**
- * Computes standard marketing aspect ratio category and human-readable label
- */
 function computeStandardAspectRatio(width: number, height: number): string {
   if (!width || !height) return 'Unknown';
   const ratio = width / height;
@@ -206,9 +183,6 @@ function computeStandardAspectRatio(width: number, height: number): string {
   return `${width}:${height}`;
 }
 
-/**
- * Extracts dominant hexadecimal color from image pixels using Sharp
- */
 async function extractDominantColorHex(buffer: Buffer): Promise<string> {
   try {
     const stats = await sharp(buffer).stats();
@@ -223,15 +197,6 @@ async function extractDominantColorHex(buffer: Buffer): Promise<string> {
   }
 }
 
-/**
- * Preprocesses an image buffer using Sharp before feeding to Tesseract OCR:
- * 1. Auto-orient based on EXIF orientation tags (handles phone/camera rotated uploads).
- * 2. Downscale huge creatives (> 2200px) down to 2000px max dimension to prevent Tesseract memory blowout.
- * 3. Upscale small creatives (< 900px) by 1.5x with Lanczos3 resampling preserving aspect ratio (fit: inside).
- * 4. Convert to grayscale to remove distracting color/chrominance noise from background graphics.
- * 5. Contrast normalization (stretching luminance across full dynamic range).
- * 6. Edge sharpening for cleaner typography contours.
- */
 async function preprocessImageForOcr(buffer: Buffer): Promise<Buffer> {
   try {
     const metadata = await sharp(buffer).metadata();
@@ -241,8 +206,6 @@ async function preprocessImageForOcr(buffer: Buffer): Promise<Buffer> {
     const height = metadata.height || 1000;
     const maxDim = Math.max(width, height);
 
-    // Normalize image to optimal OCR dimension (1000px max dimension)
-    // Tesseract recognition accuracy peaks when typography is within 25-45px x-height.
     if (maxDim > 1100 || maxDim < 850) {
       const targetMax = 1000;
       const scale = targetMax / maxDim;
@@ -250,16 +213,18 @@ async function preprocessImageForOcr(buffer: Buffer): Promise<Buffer> {
         width: Math.round(width * scale),
         height: Math.round(height * scale),
         fit: 'inside',
+        kernel: sharp.kernel.lanczos3,
       });
     }
 
     return await pipeline
       .grayscale()
       .normalize()
+      .sharpen({ sigma: 1.0, m1: 0.5, m2: 2.0 })
       .png()
       .toBuffer();
   } catch (err) {
-    console.warn('Image preprocessing for OCR encountered an issue; using original buffer:', err);
+    console.warn('Image preprocessing for OCR failed, using original buffer:', err);
     return buffer;
   }
 }
@@ -273,6 +238,7 @@ interface TesseractBlockLine {
 interface TesseractRecognizeResult {
   data?: {
     text?: string;
+    confidence?: number;
     blocks?: Array<{
       paragraphs?: Array<{
         lines?: TesseractBlockLine[];
@@ -281,25 +247,9 @@ interface TesseractRecognizeResult {
   };
 }
 
-interface TesseractWorkerWrapper {
-  recognize: (
-    b: Buffer,
-    opts?: unknown,
-    out?: { blocks?: boolean; hocr?: boolean; text?: boolean }
-  ) => Promise<TesseractRecognizeResult>;
-  setParameters?: (params: Record<string, unknown>) => Promise<unknown>;
-  terminate: () => Promise<unknown>;
-}
-
-/**
- * Runs local OCR via Tesseract.js WebAssembly with dual-pass recognition:
- * - Pass 1: Standard grayscale + Lanczos normalization for paragraph/body text
- * - Pass 2: High-contrast binarization (threshold 175) with Sparse Text segmentation (PSM 11) for marketing badges/stickers
- * Line-level block analysis, confidence evaluation, noise line filtering, and bounding box normalization.
- */
 async function runLocalTesseractOCR(
   buffer: Buffer,
-  timeoutMs = 14000
+  timeoutMs: number = 18000
 ): Promise<LocalOcrResult> {
   const emptyResult: LocalOcrResult = {
     text: '',
@@ -310,37 +260,35 @@ async function runLocalTesseractOCR(
     boundingBoxes: [],
   };
 
-  let worker: TesseractWorkerWrapper | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let worker: any = null;
 
   const ocrPromise = (async (): Promise<LocalOcrResult> => {
     try {
-      const { createWorker, PSM } = await import('tesseract.js');
-      const workerPath = path.join(
-        process.cwd(),
-        'node_modules',
-        'tesseract.js',
-        'src',
-        'worker-script',
-        'node',
-        'index.js'
-      );
-      const langPath = process.cwd();
-
-      worker = (await createWorker('eng', 1, {
-        workerPath: fs.existsSync(workerPath) ? workerPath : undefined,
-        langPath: fs.existsSync(path.join(langPath, 'eng.traineddata')) ? langPath : undefined,
-        errorHandler: (err) => console.warn('Tesseract worker notice:', err),
-      })) as unknown as TesseractWorkerWrapper;
-
       const preprocessed = await preprocessImageForOcr(buffer);
-      const prepMeta = await sharp(preprocessed).metadata();
-      const imgW = prepMeta.width || 1000;
-      const imgH = prepMeta.height || 1000;
+      const meta = await sharp(preprocessed).metadata();
+      const imgW = meta.width || 1000;
+      const imgH = meta.height || 1000;
 
-      // Pass 1: Standard body text recognition
-      const ret1 = await worker!.recognize(preprocessed, {}, { blocks: true, text: true });
+      const { createWorker, PSM } = await import('tesseract.js');
+      const trainedDataDir = process.cwd();
+      worker = await createWorker('eng', 1, {
+        cachePath: trainedDataDir,
+        gzip: false,
+        errorHandler: (e: unknown) => console.warn('Tesseract worker error:', e),
+      });
 
-      // Pass 2: High-contrast binarized sparse text recognition for colored marketing badges/promos
+      if (!worker) return emptyResult;
+
+      if (typeof worker.setParameters === 'function') {
+        await worker.setParameters({
+          tessedit_pageseg_mode: PSM.AUTO,
+        });
+      }
+
+      const ret1 = await worker.recognize(preprocessed, {}, { blocks: true, text: true });
+
+      // Secondary pass for small badges and isolated callouts
       let ret2: TesseractRecognizeResult | null = null;
       let badgeW = imgW;
       let badgeH = imgH;
@@ -365,7 +313,7 @@ async function runLocalTesseractOCR(
         badgeH = badgeMeta.height || imgH;
 
         if (typeof worker!.setParameters === 'function') {
-          await worker!.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT }); // PSM 11: SPARSE_TEXT
+          await worker!.setParameters({ tessedit_pageseg_mode: PSM.SPARSE_TEXT });
         }
         ret2 = await worker!.recognize(prepBadge, {}, { blocks: true, text: true });
       } catch (p2Err) {
@@ -384,7 +332,6 @@ async function runLocalTesseractOCR(
             }
           }
         }
-        // With sparse segmentation, badge words may reside in data.text without standard block structure
         if (retObj?.data?.text) {
           const rawTextLines = retObj.data.text.split('\n').map((t) => t.trim()).filter((t) => t.length >= 2);
           for (const rawLine of rawTextLines) {
@@ -409,7 +356,6 @@ async function runLocalTesseractOCR(
         const rawText = l.text.trim();
         if (!rawText || rawText.length < 2) return;
 
-        // Filter out obvious OCR noise artifacts (low confidence texture lines)
         if (l.confidence < 28) {
           unreadableCount++;
           return;
@@ -421,7 +367,6 @@ async function runLocalTesseractOCR(
           return;
         }
 
-        // For confidence between 28 and 48, require recognizable word or metric
         const words = cleaned.split(/\s+/).filter((w) => /^[a-zA-Z0-9$%]{2,}$/.test(w));
         const hasMetric = /[%$€£\d]/.test(cleaned) || /\b(?:off|discount|sale|save|free|protein|gluten|natural)\b/i.test(cleaned);
         const hasRecognizableWord = words.some((w) => w.length >= 3 || /^\d+%?$/.test(w)) || hasMetric;
@@ -430,7 +375,6 @@ async function runLocalTesseractOCR(
           return;
         }
 
-        // Avoid adding duplicate lines
         const normExisting = cleanLines.map((cl) => cl.toLowerCase().replace(/[^a-z0-9%]/g, ''));
         const normCandidate = cleaned.toLowerCase().replace(/[^a-z0-9%]/g, '');
         if (normExisting.includes(normCandidate)) {
@@ -459,12 +403,10 @@ async function runLocalTesseractOCR(
       for (const l of pass1Lines) {
         processLine(l, imgW, imgH);
       }
-
       for (const l of pass2Lines) {
         processLine(l, badgeW, badgeH);
       }
 
-      // If block extraction was empty for any reason, fall back to raw text with safe cleanup
       if (cleanLines.length === 0 && (ret1?.data?.text || ret2?.data?.text)) {
         const combinedRaw = [ret1?.data?.text, ret2?.data?.text].filter(Boolean).join('\n');
         const fallbackText = cleanAndNormalizeOcrText(combinedRaw);
@@ -546,7 +488,7 @@ function extractSvgText(svgContent: string): LocalOcrResult {
     const words = normalized.split(/\s+/).filter(Boolean);
     return {
       text: normalized,
-      confidence: 100, // Vector text is digitally exact
+      confidence: 100,
       wordsCount: words.length,
       linesCount: normalized.split('\n').filter(Boolean).length,
       unreadableCount: 0,
@@ -566,7 +508,6 @@ function extractSvgText(svgContent: string): LocalOcrResult {
 
 export async function runVisionAnalysis({
   imageUrl,
-  captionText = '',
   guidelines,
   facts,
   assets,
@@ -578,11 +519,22 @@ export async function runVisionAnalysis({
   const activeFacts = facts.filter((f) => f.is_active);
   const activeAssets = assets.filter((a) => a.is_active);
 
-  // 1. If explicit fixed OCR reference text is provided (for deterministic unit tests & benchmarks)
+  // 1. If explicit fixed OCR reference text is provided (for deterministic tests)
   if (ocrReferenceText && ocrReferenceText.trim()) {
     const refText = cleanAndNormalizeOcrText(ocrReferenceText.trim());
+    const refFindings: EngineFinding[] = [];
+    refFindings.push(...auditImageTextAndTypography(refText));
+    refFindings.push(...auditImageBrandAndMarketingClaims(refText, activeGuidelines, activeFacts));
+    refFindings.push(...auditImageAbusiveOrHarmfulLanguage(refText));
+    refFindings.push(...auditImageCopyrightAndIpRisks(refText, activeAssets));
+
+    const disclosures = ['Using verified fixed reference OCR text for deterministic claim comparison.'];
+    if (!apiKey) {
+      disclosures.push('Cloud AI Vision provider not configured. Creative analysis executed via deterministic rules.');
+    }
+
     return {
-      visionRun: false, // Honestly report: reference text was supplied, not cloud vision
+      visionRun: false,
       provider: 'Deterministic Reference OCR',
       model: 'reference-ocr',
       extracted_ocr_text: refText,
@@ -592,8 +544,8 @@ export async function runVisionAnalysis({
       unreadableSegmentsCount: 0,
       imageSummary: null,
       boundingBoxes: [],
-      findings: [],
-      disclosures: ['Using verified fixed reference OCR text for deterministic claim comparison.'],
+      findings: refFindings,
+      disclosures,
     };
   }
 
@@ -609,7 +561,7 @@ export async function runVisionAnalysis({
     };
   }
 
-  // 3. Extract Image Metadata via Sharp (Aspect ratio, dimensions, dominant color, format)
+  // 3. Extract Image Metadata via Sharp
   let imageSummary: ImageSummaryStats | null = null;
   try {
     const meta = await sharp(loaded.buffer).metadata();
@@ -628,7 +580,7 @@ export async function runVisionAnalysis({
       textLineCount: 0,
     };
   } catch (err) {
-    console.warn('Sharp metadata extraction encountered an issue:', err);
+    console.warn('Sharp metadata extraction issue:', err);
   }
 
   // 4. Cloud Vision Analysis via Gemini when genuine API key is configured
@@ -638,41 +590,27 @@ export async function runVisionAnalysis({
 Analyze this uploaded marketing creative image independently for visible defects, typography quality, brand policy violations, and compliance issues.
 
 === ACTIVE BRAND GUIDELINES ===
-${activeGuidelines.map((g) => `ID: ${g.id} | Type: ${g.rule_type} | Severity: ${g.severity} | Title: ${g.title} | Rule: ${g.description} | Keywords: ${JSON.stringify(g.rule_configuration.keywords || [])}`).join('\n')}
+${activeGuidelines.length > 0 ? activeGuidelines.map((g) => `ID: ${g.id} | Type: ${g.rule_type} | Severity: ${g.severity} | Title: ${g.title} | Rule: ${g.description} | Keywords: ${JSON.stringify(g.rule_configuration.keywords || [])}`).join('\n') : '(No custom brand guidelines configured - evaluate against general creative quality and advertising standards)'}
 
 === VERIFIED CORPORATE FACTS ===
-${activeFacts.map((f) => `ID: ${f.id} | Statement: ${f.fact_text} | Source: ${f.source_name}`).join('\n')}
+${activeFacts.length > 0 ? activeFacts.map((f) => `ID: ${f.id} | Statement: ${f.fact_text} | Source: ${f.source_name}`).join('\n') : '(No corporate facts configured)'}
 
 === AUTHORIZED BRAND ASSETS (Logos, Colors, Badges) ===
-${activeAssets.map((a) => `ID: ${a.id} | Name: ${a.asset_name} | Type: ${a.asset_type} | Metadata: ${JSON.stringify(a.asset_metadata || {})}`).join('\n')}
+${activeAssets.length > 0 ? activeAssets.map((a) => `ID: ${a.id} | Name: ${a.asset_name} | Type: ${a.asset_type} | Metadata: ${JSON.stringify(a.asset_metadata || {})}`).join('\n') : '(No authorized reference logo configured)'}
 
-=== ACCOMPANYING CAPTION (REFERENCE ONLY) ===
-${captionText || '(None provided)'}
-
-=== STAGE 1: IMAGE-ONLY GOVERNANCE AUDIT INSTRUCTIONS ===
+=== AUDIT INSTRUCTIONS ===
 1. Transcribe all text visibly rendered in the creative image into "extracted_ocr_text" accurately.
-2. Inspect the uploaded creative image independently across the 4 Image-First pillars:
-   PILLAR A: Spelling, Text & Typography ("spelling_and_grammar")
-   - Likely spelling mistakes, typos, duplicated words/figures (e.g. "50% 50%"), malformed words, obvious grammatical errors.
-   - Text cut off, unreadable, overlapping, poorly aligned.
-   - Preserve exact extracted text and visual location.
-
-   PILLAR B: Visual & Design Quality ("visual_design_quality")
-   - Layout problems, text clipping, poor contrast, alignment problems, distorted logos, pixelation/low resolution.
-   - Mandatory disclaimers or promotional conditions that appear visually obscured or illegible.
-
-   PILLAR C: Copyright & Intellectual-Property Risks ("copyright_and_ip_risk")
-   - Commercial stock watermarks (Getty, Shutterstock, iStock, Adobe Stock, Alamy, etc.).
-   - Recognizable third-party logos, trademarks, or characters (Apple, Nike, Disney, Coca-Cola, etc.) not in authorized brand assets.
-   - Flag potential similarity or ownership concerns for HUMAN REVIEW. Explain that copyright/trademark infringement cannot be established from pixels alone.
-
-   PILLAR D: Brand & Marketing Claims Visible in Image ("brand_marketing_claim")
-   - Contradictory claims within the image itself (e.g. 50% OFF in one area vs 70% OFF in another, or conflicting prices/specs/durations).
-   - Suspicious absolute guarantees (e.g. "100% cure", "zero risk", "completely eliminate", "unhackable").
-   - Violations of active brand guidelines and verified corporate facts.
+2. Inspect the creative image across these 7 categories:
+   - "spelling_and_text": Likely spelling mistakes, typos, duplicated words/figures, malformed words, broken words, or cut-off text.
+   - "logo_and_brand_identity": Logo distortion, stretching, improper cropping, blur, poor contrast, or deviation from configured authorized logo reference. If no official logo is configured, state that official-brand consistency could not be verified.
+   - "abusive_or_harmful_language": Profanity, insults, slurs, harassment, threats, or inappropriate copy in visible text.
+   - "layout_and_design_quality": Text clipping, cut-off elements, overlapping content, broken alignment, inconsistent spacing, unreadable font sizes, low contrast, blur, compression artifacts, or obscured disclaimers.
+   - "claims_and_consistency": Contradictory statements within the image (conflicting prices, conflicting discounts, conflicting durations or specs), suspicious absolute guarantees ("100% cure", "zero risk"), or contradictions with active brand guidelines and verified corporate facts.
+   - "copyright_and_ip_risk": Commercial stock watermarks (Getty, Shutterstock, etc.) or recognizable third-party logos/characters. Explain visible evidence and recommend human review. Do not claim legal infringement from pixels alone.
+   - "other_visible_issues": Other meaningful issues affecting professionalism, trust, or accessibility. Avoid generic nitpicking.
 
 3. For every genuine violation detected, return:
-   - "category": "spelling_and_grammar" | "visual_design_quality" | "copyright_and_ip_risk" | "brand_marketing_claim" | "cross_modal_conflict"
+   - "category": "spelling_and_text" | "logo_and_brand_identity" | "abusive_or_harmful_language" | "layout_and_design_quality" | "claims_and_consistency" | "copyright_and_ip_risk" | "other_visible_issues"
    - "severity": "low" | "medium" | "high" | "critical"
    - "finding_title": short clear title
    - "explanation": evidence-backed explanation citing the specific visual defect, rule, or claim
@@ -681,9 +619,8 @@ ${captionText || '(None provided)'}
    - "bounding_box": object with "ymin", "xmin", "ymax", "xmax" normalized from 0 to 1000 representing the region of the violation on the image. ONLY provide bounding boxes where detection is genuinely localized.
    - "suggested_fix": actionable concrete fix
    - "confidence": number between 0.0 and 1.0 based on certainty
-   - "needs_human_verification": boolean (true for potential IP risks, copyright concerns, or subjective claims)
+   - "needs_human_verification": boolean
    - "human_verification_reason": string or null
-   - "uncertainty_notes": string or null
    - "guideline_id": matching guideline UUID from above, or null
    - "fact_id": matching fact UUID from above, or null
    - "asset_id": matching asset UUID from above, or null
@@ -699,7 +636,7 @@ If there are no violations, return { "extracted_ocr_text": "...", "findings": []
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
-      const candidateModels = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+      const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
       let res: Response | null = null;
       let usedModel = candidateModels[0];
 
@@ -736,7 +673,7 @@ If there are no violations, return { "extracted_ocr_text": "...", "findings": []
             break;
           }
         } catch {
-          // Try next model candidate
+          // Try next candidate
         }
       }
 
@@ -784,9 +721,23 @@ If there are no violations, return { "extracted_ocr_text": "...", "findings": []
             }
 
             const evText = typeof f.evidence_text === 'string' ? f.evidence_text : undefined;
+            const validCategories: FindingCategory[] = [
+              'spelling_and_text',
+              'logo_and_brand_identity',
+              'abusive_or_harmful_language',
+              'layout_and_design_quality',
+              'claims_and_consistency',
+              'copyright_and_ip_risk',
+              'other_visible_issues',
+              'brand_guideline',
+            ];
+            const rawCat = typeof f.category === 'string' ? f.category : 'brand_guideline';
+            const category: FindingCategory = validCategories.includes(rawCat)
+              ? rawCat
+              : 'other_visible_issues';
 
             return {
-              category: typeof f.category === 'string' ? f.category : 'brand_guideline',
+              category,
               severity,
               finding_title: typeof f.finding_title === 'string' ? f.finding_title : 'Visual Brand Policy Violation',
               explanation: typeof f.explanation === 'string' ? f.explanation : 'Flagged by multimodal vision model.',
@@ -796,7 +747,7 @@ If there are no violations, return { "extracted_ocr_text": "...", "findings": []
               asset_id: typeof f.asset_id === 'string' ? f.asset_id : null,
               confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0.85,
               suggested_fix: typeof f.suggested_fix === 'string' ? f.suggested_fix : undefined,
-              source: 'image' as const,
+              source: 'vision_model' as const,
               verification_status: 'confirmed_violation' as const,
               bounding_box: bbox,
               target_type: (typeof f.target_type === 'string' && ['text', 'logo', 'color', 'layout', 'visual_element'].includes(f.target_type))
@@ -804,11 +755,9 @@ If there are no violations, return { "extracted_ocr_text": "...", "findings": []
                 : 'text',
               target_scope: 'image' as const,
               image_evidence: evText,
-              caption_evidence: null,
               resolution_status: 'unresolved' as const,
               needs_human_verification: Boolean(f.needs_human_verification),
               human_verification_reason: typeof f.human_verification_reason === 'string' ? f.human_verification_reason : null,
-              uncertainty_notes: typeof f.uncertainty_notes === 'string' ? f.uncertainty_notes : null,
             };
           });
 
@@ -837,47 +786,55 @@ If there are no violations, return { "extracted_ocr_text": "...", "findings": []
     }
   }
 
-  // 5. Local OCR Extraction (Tesseract.js for raster formats, SVG Vector Parser for SVGs)
-  console.log(`[OCR Pipeline] Processing creative image: "${imageUrl}" (buffer size: ${loaded.buffer.length} bytes, caption identifier/snippet: "${captionText?.slice(0, 60).replace(/\n/g, ' ') || 'none'}...")`);
+  // 5. Local OCR Extraction & Heuristic Engine
+  console.log(`[OCR Pipeline] Processing creative image: "${imageUrl}" (buffer size: ${loaded.buffer.length} bytes)`);
   let ocrResult: LocalOcrResult;
   if (loaded.mimeType === 'image/svg+xml') {
     ocrResult = extractSvgText(loaded.buffer.toString('utf-8'));
   } else {
     ocrResult = await runLocalTesseractOCR(loaded.buffer);
   }
-  console.log(`[OCR Pipeline] Extracted ${ocrResult.linesCount} lines (${ocrResult.wordsCount} words) from "${imageUrl}":\n${ocrResult.text}`);
+  console.log(`[OCR Pipeline] Extracted ${ocrResult.linesCount} lines (${ocrResult.wordsCount} words) from "${imageUrl}"`);
 
   if (imageSummary) {
     imageSummary.hasLegibleTypography = ocrResult.text.length > 0;
     imageSummary.textLineCount = ocrResult.linesCount;
   }
 
-  // 6. Direct Image-First Audits across the 4 Core Pillars
+  // 6. Direct Image-First Audits across the 6 Core Categories
   const localFindings: EngineFinding[] = [];
 
-  // Pillar A: Spelling, Text & Typography
+  // 1. Text & Spelling
   const typographyFindings = auditImageTextAndTypography(ocrResult.text, ocrResult.boundingBoxes);
   localFindings.push(...typographyFindings);
 
-  // Pillar B: Visual & Design Quality
+  // 2. Logo & Brand Identity
+  const logoFindings = auditImageLogoAndBrandIdentity(imageSummary, activeAssets);
+  localFindings.push(...logoFindings);
+
+  // 3. Abusive & Harmful Language
+  const abusiveFindings = auditImageAbusiveOrHarmfulLanguage(ocrResult.text, ocrResult.boundingBoxes);
+  localFindings.push(...abusiveFindings);
+
+  // 4. Layout & Visual Quality
   const visualFindings = auditImageVisualAndDesignQuality(imageSummary, ocrResult.text, ocrResult.boundingBoxes);
   localFindings.push(...visualFindings);
 
-  // Pillar C: Copyright & Intellectual Property Risks
-  const copyrightFindings = auditImageCopyrightAndIpRisks(ocrResult.text, activeAssets);
-  localFindings.push(...copyrightFindings);
-
-  // Pillar D: Brand & Marketing Claims in Image (Internal contradictions, absolutes, guidelines, facts)
+  // 5. Claims & Consistency
   const claimsFindings = auditImageBrandAndMarketingClaims(ocrResult.text, activeGuidelines, activeFacts);
   localFindings.push(...claimsFindings);
 
-  // Check 6b: Legibility & Unreadable Content Observation
+  // 6. Potential Copyright & IP Risks
+  const copyrightFindings = auditImageCopyrightAndIpRisks(ocrResult.text, activeAssets);
+  localFindings.push(...copyrightFindings);
+
+  // Check: Legibility & Unreadable Content Observation
   if (ocrResult.unreadableCount >= 5 && ocrResult.linesCount < 2) {
     localFindings.push({
-      category: 'visual_design_quality',
+      category: 'layout_and_design_quality',
       severity: 'low',
       finding_title: 'Degraded Typography / Low Contrast Detected',
-      explanation: `Image contains multiple text-like regions with degraded contrast or low OCR recognition confidence (<45%). Manual visual inspection is recommended to verify legibility across mobile screens.`,
+      explanation: 'Image contains multiple text-like regions with degraded contrast or low OCR recognition confidence (<45%). Manual visual inspection is recommended to verify legibility across mobile screens.',
       evidence_text: `Unreadable or degraded segments: ${ocrResult.unreadableCount}`,
       confidence: ocrResult.confidence ? ocrResult.confidence / 100 : 0.65,
       suggested_fix: 'Increase typography contrast against the background graphic and verify minimum 16px font size.',
@@ -891,25 +848,19 @@ If there are no violations, return { "extracted_ocr_text": "...", "findings": []
     });
   }
 
-  // Honest Disclosures
+  // Disclosures
   const disclosures: string[] = [
     apiKey
       ? 'Creative visual analysis executed via multimodal vision engine.'
-      : 'Creative visual typography extracted via local OCR engine (Tesseract.js).',
+      : 'Cloud AI Vision provider not configured. Creative analysis executed via local OCR and image governance heuristics.',
   ];
 
   if (!ocrResult.text) {
     disclosures.push('No legible typography was detected in this creative image.');
-  } else {
-    disclosures.push('Local Image-First audit active across Typography, Visual Quality, Copyright/IP heuristics, and Claims.');
-  }
-
-  if (!apiKey) {
-    disclosures.push('Cloud AI Vision provider not configured. Complex visual layout and trademark evaluation executed via local deterministic heuristics and flagged for human review.');
   }
 
   return {
-    visionRun: false, // Honestly report: cloud multimodal vision was NOT executed
+    visionRun: false,
     provider: loaded.mimeType === 'image/svg+xml' ? 'SVG Vector Parser' : 'Tesseract.js OCR (Local Engine)',
     model: loaded.mimeType === 'image/svg+xml' ? 'svg-xml-dom' : 'tesseract-wasm',
     extracted_ocr_text: ocrResult.text,

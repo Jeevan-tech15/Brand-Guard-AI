@@ -24,6 +24,17 @@ export type ReviewDecisionType =
   | 'rejected'
   | 'changes_requested';
 
+export type FindingCategory =
+  | 'spelling_and_text'
+  | 'logo_and_brand_identity'
+  | 'abusive_or_harmful_language'
+  | 'layout_and_design_quality'
+  | 'claims_and_consistency'
+  | 'copyright_and_ip_risk'
+  | 'other_visible_issues'
+  | 'brand_guideline'
+  | string;
+
 export interface RuleConfiguration {
   keywords?: string[];
   allowed_examples?: string[];
@@ -76,6 +87,7 @@ export interface AuthorizedAsset {
     allowed_aspect_ratios?: string[];
     notes?: string;
     is_primary?: boolean;
+    typography_family?: string;
     [key: string]: unknown;
   };
   is_active: boolean;
@@ -83,8 +95,44 @@ export interface AuthorizedAsset {
   updated_at?: string;
 }
 
+// Unified Brand Profile Configuration
+export interface BrandProfile {
+  id?: string;
+  brand_name: string;
+  brand_description: string;
+  brand_colors: string[];
+  typography_preferences?: string | {
+    primary_font?: string;
+    secondary_font?: string;
+    notes?: string;
+    [key: string]: unknown;
+  };
+  official_logo_url?: string | null;
+  official_logo_id?: string | null;
+  tone_of_voice: string;
+  prohibited_phrases: string[];
+  required_disclaimers: string[];
+  approved_facts?: Array<{
+    id?: string;
+    fact_text: string;
+    source_name: string;
+    source_url?: string | null;
+    evidence_notes?: string | null;
+    is_active?: boolean;
+  }>;
+  additional_rules?: string | Array<{
+    id?: string;
+    title: string;
+    description: string;
+    severity: RuleSeverity;
+    rule_type: string;
+    is_active?: boolean;
+  }>;
+  updated_at?: string;
+}
+
 export interface BoundingBox {
-  ymin: number; // 0 to 1000 or percentage
+  ymin: number; // 0 to 1000 normalized percentage
   xmin: number;
   ymax: number;
   xmax: number;
@@ -113,26 +161,30 @@ export interface ReviewEvaluationMetadata {
   limitationsDisclosed?: string;
   disclosures?: string[];
   imageSummary?: ImageSummaryStats | null;
-  modality?: 'multimodal' | 'image_only' | 'text_only';
+  modality?: 'image_only';
   checksStatus?: {
-    imageInspection: 'passed' | 'failed' | 'unavailable';
-    typographyExtraction: 'passed' | 'failed' | 'unavailable';
-    crossModal: 'passed' | 'failed' | 'unavailable';
-    brandGuidelines: 'passed' | 'failed' | 'unavailable';
-    factVerification: 'passed' | 'failed' | 'unavailable';
-    cloudVision: 'passed' | 'failed' | 'unavailable';
+    imageInspection?: 'passed' | 'failed' | 'unavailable';
+    typographyExtraction?: 'passed' | 'failed' | 'unavailable';
+    spellingAndGrammar?: 'passed' | 'failed' | 'unavailable';
+    logoAndBrandIdentity?: 'passed' | 'failed' | 'unavailable';
+    abusiveLanguage?: 'passed' | 'failed' | 'unavailable';
+    layoutAndDesign?: 'passed' | 'failed' | 'unavailable';
+    claimsAndConsistency?: 'passed' | 'failed' | 'unavailable';
+    copyrightAndIp?: 'passed' | 'failed' | 'unavailable';
+    brandGuidelines?: 'passed' | 'failed' | 'unavailable';
+    [key: string]: unknown;
   };
   checksCompleted?: Record<string, boolean>;
-  scoringBreakdown?: unknown;
   guidelinesEvaluatedCount?: number;
   factsEvaluatedCount?: number;
   analysisNotes?: string;
   isPartialAnalysis?: boolean;
   analysisStatus?: 'clean' | 'partial' | 'failed' | 'complete';
   governance_status?: 'PASS' | 'WARNING' | 'REVIEW REQUIRED' | 'ANALYSIS INCOMPLETE';
+  scoringBreakdown?: unknown;
 }
 
-// 4. content_reviews (Image-First & Multi-Version)
+// 4. content_reviews (Image-Only Governance & Multi-Version Reviews)
 export interface ContentReview {
   id: string;
   title: string;
@@ -141,8 +193,7 @@ export interface ContentReview {
   status: ReviewStatus;
   compliance_score?: number | null;
   review_version: number;
-  // Image-first marketing creative fields
-  image_url?: string | null;
+  image_url: string;
   original_image_url?: string | null;
   caption_text?: string | null;
   original_caption_text?: string | null;
@@ -154,9 +205,6 @@ export interface ContentReview {
   correction_metadata?: {
     replaced_text?: string;
     new_text?: string;
-    target_scope?: 'caption' | 'image' | 'both';
-    caption_before?: string;
-    caption_after?: string;
     replaced_asset_id?: string;
     edit_applied_to_pixels?: boolean;
     correction_notes?: string;
@@ -165,20 +213,20 @@ export interface ContentReview {
   evaluation_metadata?: ReviewEvaluationMetadata | null;
   created_at: string;
   updated_at?: string;
-  // Joins / relations
   findings?: ReviewFinding[];
   decisions?: ReviewDecision[];
 }
 
-// 5. review_findings (Evidence-backed with visual bounding boxes)
+// 5. review_findings (Evidence-backed visual findings)
 export interface ReviewFinding {
   id: string;
   review_id: string;
-  category: string;
+  category: FindingCategory;
   severity: RuleSeverity;
   finding_title: string;
   explanation: string;
   evidence_text?: string | null;
+  location_description?: string | null;
   guideline_id?: string | null;
   fact_id?: string | null;
   asset_id?: string | null;
@@ -186,9 +234,9 @@ export interface ReviewFinding {
   suggested_fix?: string | null;
   bounding_box?: BoundingBox | null;
   target_type?: 'text' | 'visual_element' | 'logo' | 'color' | 'layout';
-  target_scope?: 'caption' | 'image' | 'both';
-  caption_evidence?: string | null;
+  target_scope?: 'image' | 'caption' | 'both';
   image_evidence?: string | null;
+  caption_evidence?: string | null;
   proposed_replacement?: string | null;
   resolution_status?: 'unresolved' | 'resolved' | 'overridden';
   source?: string | null;
@@ -211,13 +259,13 @@ export interface ReviewDecision {
   created_at: string;
 }
 
-// Creation and Mutation Payloads
+// Creation and Mutation Payloads (Image-Only)
 export interface CreateReviewPayload {
   title: string;
-  content_text?: string;
-  caption_text?: string;
   content_type: ContentType;
   image_url?: string;
+  content_text?: string;
+  caption_text?: string;
   aspect_ratio?: string;
   image_width?: number;
   image_height?: number;
@@ -227,19 +275,16 @@ export interface CreateReviewPayload {
 
 export interface UpdateReviewVersionPayload {
   title?: string;
-  content_text?: string;
-  caption_text?: string;
   content_type?: ContentType;
   image_url?: string;
   original_image_url?: string;
+  content_text?: string;
+  caption_text?: string;
   original_caption_text?: string;
   corrected_image_url?: string;
   correction_metadata?: {
     replaced_text?: string;
     new_text?: string;
-    target_scope?: 'caption' | 'image' | 'both';
-    caption_before?: string;
-    caption_after?: string;
     replaced_asset_id?: string;
     edit_applied_to_pixels?: boolean;
     correction_notes?: string;
@@ -256,6 +301,7 @@ export interface CreateAssetPayload {
     allowed_aspect_ratios?: string[];
     notes?: string;
     is_primary?: boolean;
+    typography_family?: string;
     [key: string]: unknown;
   };
   is_active?: boolean;
@@ -270,6 +316,7 @@ export interface UpdateAssetPayload {
     allowed_aspect_ratios?: string[];
     notes?: string;
     is_primary?: boolean;
+    typography_family?: string;
     [key: string]: unknown;
   };
   is_active?: boolean;
@@ -293,6 +340,7 @@ export interface CreateGuidelinePayload {
     allowed_examples?: string[];
     forbidden_examples?: string[];
     notes?: string;
+    [key: string]: unknown;
   };
   is_active?: boolean;
 }
@@ -307,6 +355,7 @@ export interface UpdateGuidelinePayload {
     allowed_examples?: string[];
     forbidden_examples?: string[];
     notes?: string;
+    [key: string]: unknown;
   };
   is_active?: boolean;
 }

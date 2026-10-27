@@ -71,7 +71,6 @@ export default function NewReviewPage() {
   // Form State
   const [title, setTitle] = useState('');
   const [contentType, setContentType] = useState<ContentType>('social_media');
-  const [captionText, setCaptionText] = useState('');
   const [uploadedImage, setUploadedImage] = useState<UploadedImageData | null>(null);
 
   // Status & Progress State
@@ -162,7 +161,7 @@ export default function NewReviewPage() {
 
       clearTimeout(timeoutId);
       const rawText = await res.text();
-      let data: { url?: string; fileName?: string; width?: number; height?: number; aspect_ratio?: any; sizeBytes?: number; mimeType?: string; error?: string } | null = null;
+      let data: { url?: string; fileName?: string; width?: number; height?: number; aspect_ratio?: string; sizeBytes?: number; mimeType?: string; error?: string } | null = null;
       try {
         data = JSON.parse(rawText);
       } catch {
@@ -219,9 +218,6 @@ export default function NewReviewPage() {
     if (type === 'flagged') {
       setTitle('Acme Enterprise Cloud — Zero Downtime Social Launch');
       setContentType('social_media');
-      setCaptionText(
-        'Excited to unveil Acme Enterprise Cloud! Engineered to guarantee 100% unhackable security with revolutionary breakthrough uptime. Zero risk for all customers.'
-      );
       setUploadedImage({
         url: '/uploads/creatives/sample-flagged-post.svg',
         fileName: 'acme_cloud_launch_social.png',
@@ -234,9 +230,6 @@ export default function NewReviewPage() {
     } else if (type === 'compliant') {
       setTitle('Acme SLA Trust & Security Benchmark Post');
       setContentType('social_media');
-      setCaptionText(
-        'Acme Enterprise operates on documented 99.9% uptime SLA benchmarks with SOC-2 Type II verified frameworks. Multi-layered defense built for resilient teams.'
-      );
       setUploadedImage({
         url: '/uploads/creatives/sample-compliant-post.svg',
         fileName: 'acme_compliant_sla.png',
@@ -249,9 +242,6 @@ export default function NewReviewPage() {
     } else if (type === 'cloudnova') {
       setTitle('CloudNova Enterprise Cloud — Global Infrastructure Launch');
       setContentType('social_media');
-      setCaptionText(
-        'Experience 99.0% uptime with our 60-minute SLA and a 7-day free trial. Save 20% today!'
-      );
       setUploadedImage({
         url: '/uploads/creatives/heldout-tech-cloudnova.png',
         fileName: 'heldout-tech-cloudnova.png',
@@ -264,9 +254,6 @@ export default function NewReviewPage() {
     } else if (type === 'voltmax') {
       setTitle('VoltMax Pro High-Output Power Bank Campaign');
       setContentType('ad_copy');
-      setCaptionText(
-        'VoltMax Pro provides 10000mAh capacity and 30W charging speed with a 1-year warranty. 10% off today!'
-      );
       setUploadedImage({
         url: '/uploads/creatives/heldout-hw-voltmax.png',
         fileName: 'heldout-hw-voltmax.png',
@@ -279,9 +266,6 @@ export default function NewReviewPage() {
     } else if (type === 'purevita') {
       setTitle('PureVita Organic Energy Snack Bar Campaign');
       setContentType('social_media');
-      setCaptionText(
-        'Crafted with 100% organic oats and 6g plant protein with a 6-month shelf life. 5% subscriber discount.'
-      );
       setUploadedImage({
         url: '/uploads/creatives/heldout-food-purevita.png',
         fileName: 'heldout-food-purevita.png',
@@ -294,9 +278,6 @@ export default function NewReviewPage() {
     } else if (type === 'aethelgard') {
       setTitle('Aethelgard Heritage Expedition Parka Launch');
       setContentType('social_media');
-      setCaptionText(
-        'Our flagship parka includes a 2-year warranty and a 14-day return window. Save 10% this weekend!'
-      );
       setUploadedImage({
         url: '/uploads/creatives/heldout-apparel-aethelgard.png',
         fileName: 'heldout-apparel-aethelgard.png',
@@ -309,9 +290,6 @@ export default function NewReviewPage() {
     } else if (type === 'clean_lifestyle') {
       setTitle('Clean Brand Editorial — Visual Campaign');
       setContentType('social_media');
-      setCaptionText(
-        'Embrace conscious living and sustainable choices every day.'
-      );
       setUploadedImage({
         url: '/uploads/creatives/heldout-lifestyle-notext.png',
         fileName: 'heldout-lifestyle-notext.png',
@@ -358,14 +336,14 @@ export default function NewReviewPage() {
       return;
     }
 
-    if (!uploadedImage && !captionText.trim()) {
-      setErrorMsg('Please upload a marketing creative image or provide marketing copy to review.');
+    if (!uploadedImage) {
+      setErrorMsg('Please upload a marketing creative image to review.');
       return;
     }
 
     setIsDraftAction(saveAsDraft);
     setIsSubmitting(true);
-    setSubmitStage(saveAsDraft ? 'Saving draft...' : 'Auditing creative against brand guidelines & facts...');
+    setSubmitStage(saveAsDraft ? 'Saving draft...' : 'Auditing creative image against brand guidelines & visual rules...');
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
@@ -378,12 +356,11 @@ export default function NewReviewPage() {
         body: JSON.stringify({
           title: title.trim(),
           content_type: contentType,
-          content_text: captionText.trim() || (uploadedImage ? `[Creative Image: ${uploadedImage.fileName}]` : ''),
-          caption_text: captionText.trim(),
-          image_url: uploadedImage?.url || null,
-          aspect_ratio: uploadedImage?.aspect_ratio || null,
-          image_width: uploadedImage?.width || null,
-          image_height: uploadedImage?.height || null,
+          content_text: `[Creative Image: ${uploadedImage.fileName}]`,
+          image_url: uploadedImage.url,
+          aspect_ratio: uploadedImage.aspect_ratio || null,
+          image_width: uploadedImage.width || null,
+          image_height: uploadedImage.height || null,
           save_as_draft: saveAsDraft,
           status: saveAsDraft ? 'draft' : 'in_review',
         }),
@@ -665,26 +642,44 @@ export default function NewReviewPage() {
                 </p>
               </div>
 
-              {/* Post Caption / Accompanying Copy */}
-              <div>
-                <div className="flex items-center justify-between mb-1.5">
-                  <label className="block text-xs font-semibold text-gray-700">
-                    Post Caption / Accompanying Copy
-                  </label>
-                  <span className="text-[11px] text-gray-400 font-mono">
-                    {captionText.length} characters · {captionText.trim() ? captionText.trim().split(/\s+/).length : 0} words
-                  </span>
+              {/* Image-First Governance Scope */}
+              <div className="p-3.5 rounded-lg bg-teal-50/70 border border-teal-200/80 space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-teal-900">
+                  <Sparkles className="w-4 h-4 text-teal-700 shrink-0" />
+                  <span>Image-Only Governance Pipeline</span>
                 </div>
-                <textarea
-                  rows={5}
-                  value={captionText}
-                  onChange={(e) => setCaptionText(e.target.value)}
-                  placeholder="Paste the Instagram caption, hashtags, and promotional text accompanying this creative post..."
-                  className="w-full bg-white border border-gray-300 rounded-lg px-3.5 py-2.5 text-sm text-gray-900 placeholder:text-gray-400 focus:outline-none focus:border-teal-700 focus:ring-1 focus:ring-teal-700/30 font-sans resize-y transition-colors"
-                />
-                <p className="text-[11px] text-gray-400 mt-1 flex items-center gap-1">
-                  <Info className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                  Both image-embedded typography and this caption are audited simultaneously against your brand rules.
+                <p className="text-xs text-teal-800 leading-relaxed">
+                  BrandGuard audits the uploaded image pixels and all visible creative content directly across 7 compliance categories:
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1 text-[11px] text-teal-900 font-medium">
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                    <span>Spelling & Text Accuracy</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                    <span>Logo & Brand Identity</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                    <span>Abusive or Harmful Content</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                    <span>Layout & Visual Quality</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                    <span>Claims & Internal Consistency</span>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                    <span>IP, Copyright & Trademarks</span>
+                  </div>
+                </div>
+                <p className="text-[11px] text-teal-700 pt-1 flex items-center gap-1">
+                  <Info className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                  No caption required. Findings are mapped directly to image coordinates with bounding boxes.
                 </p>
               </div>
 

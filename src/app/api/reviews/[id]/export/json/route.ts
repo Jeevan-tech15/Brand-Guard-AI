@@ -43,8 +43,6 @@ export async function GET(
         updated_at: review.updated_at,
       },
       content: {
-        current_caption: review.caption_text || review.content_text,
-        original_caption: review.original_caption_text || null,
         creative_image_url: review.image_url || null,
         original_creative_image_url: review.original_image_url || null,
         corrected_creative_image_url: review.corrected_image_url || null,
@@ -52,7 +50,6 @@ export async function GET(
         version_progression: {
           has_corrected_version: Boolean((review.review_version || 1) > 1),
           pixel_edit_applied: Boolean(review.correction_metadata?.edit_applied_to_pixels),
-          caption_modified: Boolean(review.original_caption_text && review.caption_text && review.original_caption_text !== review.caption_text),
         },
       },
       evaluation: {
