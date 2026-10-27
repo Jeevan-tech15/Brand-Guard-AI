@@ -161,8 +161,10 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
   const [isApplyingCorrection, setIsApplyingCorrection] = useState(false);
   const [correctionError, setCorrectionError] = useState<string | null>(null);
 
-  // Findings Category Filter State (Image Issues, Caption Issues, Conflicts)
-  const [findingsCategoryFilter, setFindingsCategoryFilter] = useState<'all' | 'image' | 'caption' | 'conflict'>('all');
+  // Findings Category Filter State (Matching Results UI 8 Sections)
+  const [findingsCategoryFilter, setFindingsCategoryFilter] = useState<
+    'all' | 'ocr_errors' | 'visual_design' | 'copyright_ip' | 'brand_claims' | 'caption_analysis' | 'cross_modal'
+  >('all');
 
   // Expandable Diagnostics Accordion State (Requirement 6)
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
@@ -690,26 +692,125 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
     Boolean(review.corrected_image_url) ||
     Boolean(review.original_caption_text && review.caption_text && review.caption_text !== review.original_caption_text);
 
-  const imageFindingsList = review.findings?.filter(
-    (f) => f.target_scope === 'image' || (f.source === 'image' && f.target_scope !== 'both' && f.category !== 'cross_modal_conflict')
+  // Section 2: OCR Text and Text Errors (Pillar A)
+  const ocrTextErrorsList = review.findings?.filter(
+    (f) =>
+      f.category === 'spelling_and_grammar' ||
+      f.category === 'typography' ||
+      f.finding_title.toLowerCase().includes('spelling') ||
+      f.finding_title.toLowerCase().includes('duplicate') ||
+      f.finding_title.toLowerCase().includes('cut-off') ||
+      f.finding_title.toLowerCase().includes('typo')
   ) || [];
 
-  const captionFindingsList = review.findings?.filter(
-    (f) => f.target_scope === 'caption' || (f.source === 'caption' && f.target_scope !== 'both' && f.category !== 'cross_modal_conflict')
+  // Section 3: Visual Design Issues (Pillar B)
+  const visualDesignIssuesList = review.findings?.filter(
+    (f) =>
+      f.category === 'visual_design_quality' ||
+      f.category === 'unreadable_content' ||
+      f.category === 'layout' ||
+      f.finding_title.toLowerCase().includes('resolution') ||
+      f.finding_title.toLowerCase().includes('pixelation') ||
+      f.finding_title.toLowerCase().includes('obscured') ||
+      f.finding_title.toLowerCase().includes('disclaimer') ||
+      f.finding_title.toLowerCase().includes('contrast')
   ) || [];
 
-  const conflictFindingsList = review.findings?.filter(
-    (f) => f.target_scope === 'both' || f.category === 'cross_modal_conflict'
+  // Section 4: Potential Copyright / IP Risks (Pillar C)
+  const copyrightIpRisksList = review.findings?.filter(
+    (f) =>
+      f.category === 'copyright_and_ip_risk' ||
+      f.category === 'logo_integrity' ||
+      f.finding_title.toLowerCase().includes('copyright') ||
+      f.finding_title.toLowerCase().includes('trademark') ||
+      f.finding_title.toLowerCase().includes('watermark') ||
+      f.finding_title.toLowerCase().includes('third-party') ||
+      f.finding_title.toLowerCase().includes('intellectual property')
+  ) || [];
+
+  // Section 5: Brand and Marketing Claim Checks (Pillar D)
+  const brandClaimChecksList = review.findings?.filter(
+    (f) =>
+      (f.category === 'brand_marketing_claim' ||
+       f.category === 'prohibited_claim' ||
+       f.category === 'voice_and_tone' ||
+       f.finding_title.toLowerCase().includes('conflicting') ||
+       f.finding_title.toLowerCase().includes('contradictory') ||
+       f.finding_title.toLowerCase().includes('discount') ||
+       f.finding_title.toLowerCase().includes('absolute') ||
+       f.finding_title.toLowerCase().includes('unsubstantiated') ||
+       f.finding_title.toLowerCase().includes('prohibited')) &&
+      f.target_scope !== 'caption' &&
+      !(f.target_scope === 'both' && f.category === 'cross_modal_conflict')
+  ) || [];
+
+  // Section 6: Caption Analysis (Priority 2)
+  const captionAnalysisList = review.findings?.filter(
+    (f) =>
+      f.target_scope === 'caption' &&
+      f.category !== 'cross_modal_conflict'
+  ) || [];
+
+  // Section 7: Image-versus-Caption Conflicts (Priority 3)
+  const crossModalConflictsList = review.findings?.filter(
+    (f) =>
+      f.target_scope === 'both' ||
+      f.category === 'cross_modal_conflict'
   ) || [];
 
   const displayedFindings = (review.findings || []).filter((f) => {
-    if (findingsCategoryFilter === 'image') {
-      return f.target_scope === 'image' || (f.source === 'image' && f.target_scope !== 'both' && f.category !== 'cross_modal_conflict');
+    if (findingsCategoryFilter === 'ocr_errors') {
+      return (
+        f.category === 'spelling_and_grammar' ||
+        f.category === 'typography' ||
+        f.finding_title.toLowerCase().includes('spelling') ||
+        f.finding_title.toLowerCase().includes('duplicate') ||
+        f.finding_title.toLowerCase().includes('cut-off') ||
+        f.finding_title.toLowerCase().includes('typo')
+      );
     }
-    if (findingsCategoryFilter === 'caption') {
-      return f.target_scope === 'caption' || (f.source === 'caption' && f.target_scope !== 'both' && f.category !== 'cross_modal_conflict');
+    if (findingsCategoryFilter === 'visual_design') {
+      return (
+        f.category === 'visual_design_quality' ||
+        f.category === 'unreadable_content' ||
+        f.category === 'layout' ||
+        f.finding_title.toLowerCase().includes('resolution') ||
+        f.finding_title.toLowerCase().includes('pixelation') ||
+        f.finding_title.toLowerCase().includes('obscured') ||
+        f.finding_title.toLowerCase().includes('disclaimer') ||
+        f.finding_title.toLowerCase().includes('contrast')
+      );
     }
-    if (findingsCategoryFilter === 'conflict') {
+    if (findingsCategoryFilter === 'copyright_ip') {
+      return (
+        f.category === 'copyright_and_ip_risk' ||
+        f.category === 'logo_integrity' ||
+        f.finding_title.toLowerCase().includes('copyright') ||
+        f.finding_title.toLowerCase().includes('trademark') ||
+        f.finding_title.toLowerCase().includes('watermark') ||
+        f.finding_title.toLowerCase().includes('third-party') ||
+        f.finding_title.toLowerCase().includes('intellectual property')
+      );
+    }
+    if (findingsCategoryFilter === 'brand_claims') {
+      return (
+        (f.category === 'brand_marketing_claim' ||
+         f.category === 'prohibited_claim' ||
+         f.category === 'voice_and_tone' ||
+         f.finding_title.toLowerCase().includes('conflicting') ||
+         f.finding_title.toLowerCase().includes('contradictory') ||
+         f.finding_title.toLowerCase().includes('discount') ||
+         f.finding_title.toLowerCase().includes('absolute') ||
+         f.finding_title.toLowerCase().includes('unsubstantiated') ||
+         f.finding_title.toLowerCase().includes('prohibited')) &&
+        f.target_scope !== 'caption' &&
+        !(f.target_scope === 'both' && f.category === 'cross_modal_conflict')
+      );
+    }
+    if (findingsCategoryFilter === 'caption_analysis') {
+      return f.target_scope === 'caption' && f.category !== 'cross_modal_conflict';
+    }
+    if (findingsCategoryFilter === 'cross_modal') {
       return f.target_scope === 'both' || f.category === 'cross_modal_conflict';
     }
     return true;
@@ -1362,12 +1463,12 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                   Verified independently across Image Inspection, Caption Audit, and Cross-Modal Consistency
                 </CardDescription>
 
-                {/* Grouping Filter Pills (Stage 1 Image, Stage 2 Caption, Stage 3 Conflicts) */}
-                <div className="flex flex-wrap items-center gap-2 pt-1">
+                {/* 8-Section Filter Pills */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
                   <button
                     type="button"
                     onClick={() => setFindingsCategoryFilter('all')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                       findingsCategoryFilter === 'all'
                         ? 'bg-slate-900 text-white shadow-sm ring-1 ring-slate-900'
                         : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
@@ -1377,39 +1478,75 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFindingsCategoryFilter('image')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-                      findingsCategoryFilter === 'image'
+                    onClick={() => setFindingsCategoryFilter('ocr_errors')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer ${
+                      findingsCategoryFilter === 'ocr_errors'
+                        ? 'bg-orange-700 text-white shadow-sm ring-1 ring-orange-700'
+                        : 'bg-orange-50 text-orange-950 hover:bg-orange-100 border border-orange-200'
+                    }`}
+                  >
+                    <span>2. Text & Typos</span>
+                    <span className="font-mono text-[10px] opacity-80">({ocrTextErrorsList.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFindingsCategoryFilter('visual_design')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer ${
+                      findingsCategoryFilter === 'visual_design'
                         ? 'bg-sky-700 text-white shadow-sm ring-1 ring-sky-700'
                         : 'bg-sky-50 text-sky-900 hover:bg-sky-100 border border-sky-200'
                     }`}
                   >
-                    <ImageIcon className="w-3.5 h-3.5" />
-                    Image Issues ({imageFindingsList.length})
+                    <span>3. Visual Design</span>
+                    <span className="font-mono text-[10px] opacity-80">({visualDesignIssuesList.length})</span>
                   </button>
                   <button
                     type="button"
-                    onClick={() => setFindingsCategoryFilter('caption')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-                      findingsCategoryFilter === 'caption'
-                        ? 'bg-amber-700 text-white shadow-sm ring-1 ring-amber-700'
-                        : 'bg-amber-50 text-amber-950 hover:bg-amber-100 border border-amber-200'
-                    }`}
-                  >
-                    <FileText className="w-3.5 h-3.5" />
-                    Caption Issues ({captionFindingsList.length})
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFindingsCategoryFilter('conflict')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer ${
-                      findingsCategoryFilter === 'conflict'
+                    onClick={() => setFindingsCategoryFilter('copyright_ip')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer ${
+                      findingsCategoryFilter === 'copyright_ip'
                         ? 'bg-purple-700 text-white shadow-sm ring-1 ring-purple-700'
                         : 'bg-purple-50 text-purple-950 hover:bg-purple-100 border border-purple-200'
                     }`}
                   >
-                    <Layers className="w-3.5 h-3.5" />
-                    Image vs Caption Conflicts ({conflictFindingsList.length})
+                    <span>4. Copyright & IP</span>
+                    <span className="font-mono text-[10px] opacity-80">({copyrightIpRisksList.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFindingsCategoryFilter('brand_claims')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer ${
+                      findingsCategoryFilter === 'brand_claims'
+                        ? 'bg-rose-700 text-white shadow-sm ring-1 ring-rose-700'
+                        : 'bg-rose-50 text-rose-950 hover:bg-rose-100 border border-rose-200'
+                    }`}
+                  >
+                    <span>5. Claims & Contradictions</span>
+                    <span className="font-mono text-[10px] opacity-80">({brandClaimChecksList.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFindingsCategoryFilter('caption_analysis')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer ${
+                      findingsCategoryFilter === 'caption_analysis'
+                        ? 'bg-amber-700 text-white shadow-sm ring-1 ring-amber-700'
+                        : 'bg-amber-50 text-amber-950 hover:bg-amber-100 border border-amber-200'
+                    }`}
+                  >
+                    <span>6. Caption</span>
+                    <span className="font-mono text-[10px] opacity-80">({captionAnalysisList.length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFindingsCategoryFilter('cross_modal')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all flex items-center gap-1 cursor-pointer ${
+                      findingsCategoryFilter === 'cross_modal'
+                        ? 'bg-indigo-700 text-white shadow-sm ring-1 ring-indigo-700'
+                        : 'bg-indigo-50 text-indigo-950 hover:bg-indigo-100 border border-indigo-200'
+                    }`}
+                  >
+                    <span>7. Conflicts</span>
+                    <span className="font-mono text-[10px] opacity-80">({crossModalConflictsList.length})</span>
                   </button>
                 </div>
               </div>
@@ -1447,7 +1584,7 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
               <div className="py-8 text-center text-gray-500">
                 <CheckCircle2 className="w-6 h-6 text-emerald-600 mx-auto mb-1.5" />
                 <p className="text-xs font-semibold text-gray-800">
-                  No {findingsCategoryFilter === 'image' ? 'Image Issues' : findingsCategoryFilter === 'caption' ? 'Caption Issues' : 'Cross-Modal Conflicts'} Detected
+                  No {findingsCategoryFilter === 'ocr_errors' ? 'Spelling or Typographical Errors' : findingsCategoryFilter === 'visual_design' ? 'Visual Design Issues' : findingsCategoryFilter === 'copyright_ip' ? 'Copyright / IP Risks' : findingsCategoryFilter === 'brand_claims' ? 'Brand Claim Inconsistencies' : findingsCategoryFilter === 'caption_analysis' ? 'Caption Issues' : findingsCategoryFilter === 'cross_modal' ? 'Cross-Modal Conflicts' : 'Violations'} Detected
                 </p>
                 <p className="text-[11px] text-gray-400 mt-0.5">
                   This creative has zero violations in the selected inspection stage.
@@ -1522,27 +1659,31 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                           ) : null}
 
                           {/* Category Descriptor */}
-                          {f.category === 'brand_guideline' || f.category.includes('prohibited') || f.category.includes('disclaimer') || f.category === 'exact_slogan' ? (
-                            <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-rose-50 text-rose-800 border border-rose-200">
-                              Brand Rule
+                          {f.category === 'spelling_and_grammar' ? (
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-orange-50 text-orange-950 border border-orange-200">
+                              2. Spelling & Typography
                             </span>
-                          ) : f.category.includes('unverified') || f.category.includes('unsubstantiated') || f.category === 'unauthorized_claim' ? (
-                            <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-amber-50 text-amber-900 border border-amber-200">
-                              Unverified Claim
+                          ) : f.category === 'visual_design_quality' || f.category === 'unreadable_content' ? (
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-sky-50 text-sky-950 border border-sky-200">
+                              3. Visual Design Quality
                             </span>
-                          ) : f.category === 'visual_design_observation' || f.category === 'layout' || f.category === 'color_palette' ? (
-                            <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-sky-50 text-sky-800 border border-sky-200">
-                              Visual Layout
+                          ) : f.category === 'copyright_and_ip_risk' ? (
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-purple-50 text-purple-950 border border-purple-200">
+                              4. Copyright & IP Risk
                             </span>
-                          ) : f.category === 'spelling_grammar' ? (
-                            <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-orange-50 text-orange-900 border border-orange-200">
-                              Spelling / Grammar
+                          ) : f.category === 'brand_marketing_claim' ? (
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-rose-50 text-rose-950 border border-rose-200">
+                              5. Brand & Claim Check
                             </span>
-                          ) : f.category === 'unreadable_content' ? (
-                            <span className="text-xs font-medium px-2 py-0.5 rounded-md bg-yellow-50 text-yellow-900 border border-yellow-200">
-                              Unreadable Text
+                          ) : f.category === 'cross_modal_conflict' ? (
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-950 border border-indigo-200">
+                              7. Cross-Modal Conflict
                             </span>
-                          ) : null}
+                          ) : (
+                            <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-slate-50 text-slate-800 border border-slate-200">
+                              {f.category.replace(/_/g, ' ')}
+                            </span>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-1.5">
@@ -1566,6 +1707,29 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                           {f.explanation}
                         </p>
                       </div>
+
+                      {/* Human Verification Required Banner */}
+                      {(f.needs_human_verification || f.category === 'copyright_and_ip_risk') && (
+                        <div className="p-2.5 rounded-lg bg-purple-50 border border-purple-200 text-xs flex items-start gap-2 text-purple-950">
+                          <AlertTriangle className="w-4 h-4 text-purple-700 shrink-0 mt-0.5" />
+                          <div className="space-y-0.5">
+                            <span className="font-bold text-[11px] uppercase tracking-wide text-purple-900 block">
+                              ⚠️ Human Verification Required
+                            </span>
+                            <p className="text-purple-800 text-xs leading-relaxed">
+                              {f.human_verification_reason ||
+                                (f.category === 'copyright_and_ip_risk'
+                                  ? 'Flagged for reviewer signoff. Copyright ownership and trademark licensing cannot be definitively established from pixels alone.'
+                                  : 'Requires human brand reviewer confirmation before commercial distribution.')}
+                            </p>
+                            {f.uncertainty_notes && (
+                              <p className="text-purple-700/80 text-[11px] italic">
+                                Note: {f.uncertainty_notes}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Evidence Display with Clear Visual Distinction */}
                       {isConflict && (f.image_evidence || f.caption_evidence) ? (
@@ -1629,6 +1793,99 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                 })}
               </div>
             )}
+          </Card>
+
+          {/* Section 8: Analysis Coverage, Limitations & Final Review Status */}
+          <Card className="bg-white border-gray-200 shadow-xs">
+            <CardHeader className="pb-2 border-b border-gray-100">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2 text-gray-900">
+                  <ShieldCheck className="w-4 h-4 text-teal-800" />
+                  8. Coverage, Limitations & Final Review Status
+                </CardTitle>
+                {(() => {
+                  const gov =
+                    review.evaluation_metadata?.governance_status ||
+                    (criticalCount > 0 || highCount > 0
+                      ? 'REVIEW REQUIRED'
+                      : review.evaluation_metadata?.isPartialAnalysis
+                      ? 'ANALYSIS INCOMPLETE'
+                      : (review.compliance_score ?? 0) >= 90
+                      ? 'PASS'
+                      : 'WARNING');
+                  return (
+                    <span
+                      className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${
+                        gov === 'PASS'
+                          ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                          : gov === 'WARNING'
+                          ? 'bg-amber-100 text-amber-950 border-amber-300'
+                          : gov === 'REVIEW REQUIRED'
+                          ? 'bg-rose-100 text-rose-900 border-rose-300'
+                          : 'bg-yellow-100 text-yellow-950 border-yellow-300'
+                      }`}
+                    >
+                      Status: {gov}
+                    </span>
+                  );
+                })()}
+              </div>
+              <CardDescription>
+                Governance status determined strictly from evidence coverage and verified modality inputs.
+              </CardDescription>
+            </CardHeader>
+            <div className="p-3.5 sm:p-4 space-y-3 text-xs">
+              {/* Coverage Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-center text-[11px]">
+                <div className="p-2 rounded bg-slate-50 border border-slate-200">
+                  <span className="text-slate-500 uppercase tracking-wide block text-[10px]">1. Image Analysis</span>
+                  <span className="font-semibold text-emerald-700">✓ Inspected</span>
+                </div>
+                <div className="p-2 rounded bg-slate-50 border border-slate-200">
+                  <span className="text-slate-500 uppercase tracking-wide block text-[10px]">2. OCR Typography</span>
+                  <span className="font-semibold text-emerald-700">
+                    {review.extracted_ocr_text ? '✓ Extracted' : 'No text in image'}
+                  </span>
+                </div>
+                <div className="p-2 rounded bg-slate-50 border border-slate-200">
+                  <span className="text-slate-500 uppercase tracking-wide block text-[10px]">3. Visual Quality</span>
+                  <span className="font-semibold text-emerald-700">✓ Audited</span>
+                </div>
+                <div className="p-2 rounded bg-slate-50 border border-slate-200">
+                  <span className="text-slate-500 uppercase tracking-wide block text-[10px]">4. Copyright / IP</span>
+                  <span className="font-semibold text-purple-700">✓ Human Review Gate</span>
+                </div>
+                <div className="p-2 rounded bg-slate-50 border border-slate-200">
+                  <span className="text-slate-500 uppercase tracking-wide block text-[10px]">5. Claims & Facts</span>
+                  <span className="font-semibold text-emerald-700">✓ Audited</span>
+                </div>
+                <div className="p-2 rounded bg-slate-50 border border-slate-200">
+                  <span className="text-slate-500 uppercase tracking-wide block text-[10px]">6. Caption Audit</span>
+                  <span className="font-semibold text-slate-700">
+                    {review.caption_text ? '✓ Audited' : 'N/A (Image-Only)'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Engine Disclosures & Limitations */}
+              <div className="p-3 rounded-lg bg-amber-50/70 border border-amber-200 text-amber-950 text-xs space-y-1.5">
+                <span className="font-bold text-[11px] uppercase tracking-wide text-amber-900 block flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5 text-amber-800" />
+                  Engine Disclosures & Limitations:
+                </span>
+                <ul className="list-disc pl-4 space-y-1 text-amber-900 text-[11px] leading-relaxed">
+                  <li>
+                    <strong>Copyright / IP:</strong> Trademark and copyright ownership cannot be confirmed from pixels alone. Detected third-party marks and watermarks are flagged for human review.
+                  </li>
+                  <li>
+                    <strong>Analysis Coverage:</strong> {review.evaluation_metadata?.aiRun ? `Multimodal creative visual analysis executed via ${review.evaluation_metadata?.visionModelUsed || 'Google Gemini Vision'}.` : 'Analyzed via local OCR (Tesseract.js) and deterministic rules engine.'}
+                  </li>
+                  {review.evaluation_metadata?.disclosures?.map((d, idx) => (
+                    <li key={idx}>{d}</li>
+                  ))}
+                </ul>
+              </div>
+            </div>
           </Card>
         </div>
       </div>

@@ -129,6 +129,7 @@ export interface ReviewEvaluationMetadata {
   analysisNotes?: string;
   isPartialAnalysis?: boolean;
   analysisStatus?: 'clean' | 'partial' | 'failed' | 'complete';
+  governance_status?: 'PASS' | 'WARNING' | 'REVIEW REQUIRED' | 'ANALYSIS INCOMPLETE';
 }
 
 // 4. content_reviews (Image-First & Multi-Version)
@@ -192,6 +193,9 @@ export interface ReviewFinding {
   resolution_status?: 'unresolved' | 'resolved' | 'overridden';
   source?: string | null;
   verification_status?: string | null;
+  needs_human_verification?: boolean;
+  human_verification_reason?: string | null;
+  uncertainty_notes?: string | null;
   created_at: string;
 }
 

@@ -860,6 +860,9 @@ export async function saveReviewEvaluation(
       image_evidence: f.image_evidence || null,
       proposed_replacement: f.proposed_replacement || null,
       resolution_status: f.resolution_status || 'unresolved',
+      needs_human_verification: Boolean(f.needs_human_verification),
+      human_verification_reason: f.human_verification_reason || null,
+      uncertainty_notes: f.uncertainty_notes || null,
       created_at: now,
     });
   }

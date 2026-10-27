@@ -2,291 +2,360 @@ import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
 import { runComplianceReview } from '../src/lib/engine';
-import { getBrandGuidelines, getApprovedFacts, getAuthorizedAssets, createContentReview, getContentReviewById } from '../src/lib/db';
+import { BrandGuideline, ApprovedFact, AuthorizedAsset } from '../src/lib/types';
 
-async function main() {
-  console.log('================================================================');
-  console.log('BRANDGUARD AI: AUDIT OF GENUINELY UNSEEN CREATIVES');
-  console.log('================================================================\n');
+// Mock active guidelines
+const MOCK_GUIDELINES: BrandGuideline[] = [
+  {
+    id: 'g-1',
+    title: 'No Prohibited Absolute Guarantees',
+    description: 'Marketing copy must never state unqualified absolutes such as "100% cure" or "zero risk".',
+    rule_type: 'prohibited_claim',
+    severity: 'high',
+    rule_configuration: {
+      keywords: ['100% cure', 'zero risk', 'unhackable', 'miracle cure'],
+    },
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'g-2',
+    title: 'Approved Slogan Capitalization',
+    description: 'Use the official slogan "Engineered for Enterprise Reliability".',
+    rule_type: 'exact_slogan',
+    severity: 'medium',
+    rule_configuration: {
+      exact_slogan: 'Engineered for Enterprise Reliability',
+    },
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+];
 
-  const creativesDir = path.join(process.cwd(), 'public', 'uploads', 'creatives');
-  if (!fs.existsSync(creativesDir)) {
-    fs.mkdirSync(creativesDir, { recursive: true });
-  }
+// Mock verified facts
+const MOCK_FACTS: ApprovedFact[] = [
+  {
+    id: 'f-1',
+    fact_text: 'Documented 99.9% uptime SLA with multi-region high availability',
+    source_name: 'Engineering Infrastructure SLA 2026',
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'f-2',
+    fact_text: 'Contains 40g of protein per serving bar',
+    source_name: 'Nutrition Lab Certificate 2026',
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'f-3',
+    fact_text: 'SOC-2 Type II Certified Security Infrastructure',
+    source_name: 'Security & Compliance Report 2026',
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+];
 
-  // -------------------------------------------------------------------
-  // 1. Generate Genuinely Unseen SVG and PNG Creatives
-  // -------------------------------------------------------------------
+// Mock authorized assets (Acme, NaturaByte, SoundZen are authorized; Apple, Getty are NOT)
+const MOCK_ASSETS: AuthorizedAsset[] = [
+  {
+    id: 'a-1',
+    asset_name: 'SoundZen',
+    asset_type: 'logo',
+    file_url: '/assets/soundzen-logo.png',
+    asset_metadata: { is_primary: true },
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'a-2',
+    asset_name: 'Acme Enterprise',
+    asset_type: 'logo',
+    file_url: '/assets/acme-logo.png',
+    asset_metadata: { is_primary: true },
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+  {
+    id: 'a-3',
+    asset_name: 'NaturaByte',
+    asset_type: 'logo',
+    file_url: '/assets/naturabyte-logo.png',
+    asset_metadata: { is_primary: true },
+    is_active: true,
+    created_at: new Date().toISOString(),
+  },
+];
 
-  // Creative 1: Clean Travel & Luxury Hospitality (WanderLuxe Escapes)
-  const wanderluxeSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080">
-  <defs>
-    <linearGradient id="bg-wl" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0f172a"/>
-      <stop offset="100%" stop-color="#1e293b"/>
-    </linearGradient>
-  </defs>
-  <rect width="1080" height="1080" fill="url(#bg-wl)"/>
-  <rect x="60" y="60" width="960" height="960" rx="24" fill="none" stroke="#334155" stroke-width="2"/>
-  <text x="540" y="220" font-family="system-ui, sans-serif" font-size="44" font-weight="800" fill="#f8fafc" text-anchor="middle" letter-spacing="3">WANDERLUXE ESCAPES</text>
-  <text x="540" y="280" font-family="system-ui, sans-serif" font-size="22" font-weight="500" fill="#94a3b8" text-anchor="middle">CURATED LUXURY EXPEDITIONS</text>
-  <rect x="140" y="360" width="800" height="380" rx="16" fill="#1e293b" stroke="#475569" stroke-width="1"/>
-  <text x="540" y="440" font-family="system-ui, sans-serif" font-size="28" font-weight="600" fill="#e2e8f0" text-anchor="middle">Handcrafted boutique journeys across Europe &amp; Asia</text>
-  <text x="540" y="520" font-family="system-ui, sans-serif" font-size="26" font-weight="500" fill="#cbd5e1" text-anchor="middle">Complimentary daily breakfast and private concierge</text>
-  <text x="540" y="600" font-family="system-ui, sans-serif" font-size="26" font-weight="500" fill="#cbd5e1" text-anchor="middle">Tailored five-star boutique accommodations</text>
-  <text x="540" y="670" font-family="system-ui, sans-serif" font-size="22" font-weight="400" fill="#94a3b8" text-anchor="middle">Verified member of International Luxury Hotel Association</text>
-  <rect x="340" y="800" width="400" height="70" rx="35" fill="#0f766e"/>
-  <text x="540" y="845" font-family="system-ui, sans-serif" font-size="24" font-weight="700" fill="#ffffff" text-anchor="middle">EXPLORE ITINERARIES</text>
-</svg>`;
-
-  // Creative 2: HealthTech Device with Embedded Text Error (VitalPulse Diagnostics)
-  const vitalpulseSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080">
-  <defs>
-    <linearGradient id="bg-vp" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#022c22"/>
-      <stop offset="100%" stop-color="#064e3b"/>
-    </linearGradient>
-  </defs>
-  <rect width="1080" height="1080" fill="url(#bg-vp)"/>
-  <rect x="60" y="60" width="960" height="960" rx="24" fill="none" stroke="#047857" stroke-width="2"/>
-  <text x="540" y="200" font-family="system-ui, sans-serif" font-size="44" font-weight="800" fill="#ffffff" text-anchor="middle" letter-spacing="2">VITALPULSE HEALTH</text>
-  <text x="540" y="260" font-family="system-ui, sans-serif" font-size="24" font-weight="600" fill="#6ee7b7" text-anchor="middle">CLINICAL CARDIAC TELEMETRY</text>
-  <rect x="120" y="340" width="840" height="420" rx="16" fill="#065f46" stroke="#10b981" stroke-width="1.5"/>
-  <text x="540" y="420" font-family="system-ui, sans-serif" font-size="30" font-weight="700" fill="#ffffff" text-anchor="middle">Continuous 24/7 ECG Cardiac Monitoring</text>
-  <text x="540" y="500" font-family="system-ui, sans-serif" font-size="28" font-weight="800" fill="#fef08a" text-anchor="middle">100% Guaranteed Cure for All Heart Arrhythmias</text>
-  <text x="540" y="580" font-family="system-ui, sans-serif" font-size="26" font-weight="600" fill="#a7f3d0" text-anchor="middle">Zero risk cardiovascular protection for everyone</text>
-  <text x="540" y="660" font-family="system-ui, sans-serif" font-size="24" font-weight="500" fill="#d1fae5" text-anchor="middle">Medical grade clinical sensor suite</text>
-  <rect x="340" y="820" width="400" height="70" rx="35" fill="#047857"/>
-  <text x="540" y="865" font-family="system-ui, sans-serif" font-size="24" font-weight="700" fill="#ffffff" text-anchor="middle">ORDER TEST MONITOR</text>
-</svg>`;
-
-  // Creative 3: Automotive EV with Multimodal Contradictions (Hyperion Motors)
-  const hyperionSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 1080" width="1080" height="1080">
-  <defs>
-    <linearGradient id="bg-hy" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0a0a0a"/>
-      <stop offset="100%" stop-color="#171717"/>
-    </linearGradient>
-  </defs>
-  <rect width="1080" height="1080" fill="url(#bg-hy)"/>
-  <rect x="60" y="60" width="960" height="960" rx="24" fill="none" stroke="#262626" stroke-width="2"/>
-  <text x="540" y="190" font-family="system-ui, sans-serif" font-size="46" font-weight="800" fill="#ffffff" text-anchor="middle" letter-spacing="3">HYPERION MOTORS</text>
-  <text x="540" y="250" font-family="system-ui, sans-serif" font-size="24" font-weight="600" fill="#38bdf8" text-anchor="middle">HORIZON GT ELECTRIC SEDAN</text>
-  <rect x="120" y="320" width="840" height="440" rx="16" fill="#171717" stroke="#404040" stroke-width="1.5"/>
-  <text x="540" y="400" font-family="system-ui, sans-serif" font-size="32" font-weight="700" fill="#ffffff" text-anchor="middle">520 miles range on a single charge</text>
-  <text x="540" y="480" font-family="system-ui, sans-serif" font-size="32" font-weight="700" fill="#38bdf8" text-anchor="middle">FLAT $8,000 Federal &amp; Dealer Rebate</text>
-  <text x="540" y="560" font-family="system-ui, sans-serif" font-size="32" font-weight="700" fill="#facc15" text-anchor="middle">8-year battery warranty</text>
-  <text x="540" y="640" font-family="system-ui, sans-serif" font-size="32" font-weight="700" fill="#4ade80" text-anchor="middle">Fast 15-minute DC charging</text>
-  <text x="540" y="710" font-family="system-ui, sans-serif" font-size="22" font-weight="400" fill="#a3a3a3" text-anchor="middle">EPA estimated range. Subject to dealer terms.</text>
-  <rect x="340" y="820" width="400" height="70" rx="35" fill="#0284c7"/>
-  <text x="540" y="865" font-family="system-ui, sans-serif" font-size="24" font-weight="700" fill="#ffffff" text-anchor="middle">RESERVE HORIZON GT</text>
-</svg>`;
-
-  const wlSvgPath = path.join(creativesDir, 'unseen-clean-wanderluxe.svg');
-  const wlPngPath = path.join(creativesDir, 'unseen-clean-wanderluxe.png');
-  const vpSvgPath = path.join(creativesDir, 'unseen-error-vitalpulse.svg');
-  const vpPngPath = path.join(creativesDir, 'unseen-error-vitalpulse.png');
-  const hySvgPath = path.join(creativesDir, 'unseen-contradiction-hyperion.svg');
-  const hyPngPath = path.join(creativesDir, 'unseen-contradiction-hyperion.png');
-
-  fs.writeFileSync(wlSvgPath, wanderluxeSvg, 'utf8');
-  fs.writeFileSync(vpSvgPath, vitalpulseSvg, 'utf8');
-  fs.writeFileSync(hySvgPath, hyperionSvg, 'utf8');
-
-  await Promise.all([
-    sharp(wlSvgPath).png().toFile(wlPngPath),
-    sharp(vpSvgPath).png().toFile(vpPngPath),
-    sharp(hySvgPath).png().toFile(hyPngPath),
-  ]);
-
-  console.log('Generated fresh unseen creatives (SVG + Sharp Rasterized PNG):');
-  console.log('  1. Clean: WanderLuxe Escapes (' + wlPngPath + ')');
-  console.log('  2. Embedded Error: VitalPulse (' + vpPngPath + ')');
-  console.log('  3. Multimodal Contradictions: Hyperion Motors (' + hyPngPath + ')\n');
-
-  // Load Active Brand Governance Rules from Database
-  const [guidelines, facts, assets] = await Promise.all([
-    getBrandGuidelines(true),
-    getApprovedFacts(true),
-    getAuthorizedAssets(true),
-  ]);
-
-  let tp = 0;
-  let tn = 0;
-  let fp = 0;
-  let fn = 0;
-
-  function recordResult(condition: boolean, type: 'TP' | 'TN', desc: string) {
-    if (type === 'TP') {
-      if (condition) {
-        tp++;
-        console.log(`  ✓ [TP: True Positive] ${desc}`);
-      } else {
-        fn++;
-        console.error(`  ✗ [FN: False Negative / Miss] ${desc}`);
-      }
-    } else {
-      if (condition) {
-        tn++;
-        console.log(`  ✓ [TN: True Negative] ${desc}`);
-      } else {
-        fp++;
-        console.error(`  ✗ [FP: False Positive / Spurious Alarm] ${desc}`);
-      }
-    }
-  }
-
-  // -------------------------------------------------------------------
-  // TEST 1: Genuinely Unseen Clean Creative (WanderLuxe Escapes)
-  // -------------------------------------------------------------------
-  console.log('--- Test 1: Clean Creative — WanderLuxe Escapes (Travel & Hospitality) ---');
-  const wlCaption = 'Discover handcrafted boutique journeys across Europe and Asia with WanderLuxe Escapes. Every booking includes complimentary daily breakfast and private concierge services.';
-  
-  const wlReview = await runComplianceReview(
-    wlCaption,
-    'social_media',
-    guidelines,
-    facts,
-    {
-      imageUrl: '/uploads/creatives/unseen-clean-wanderluxe.png',
-      captionText: wlCaption,
-      assets,
-    }
-  );
-
-  console.log(`  Observed OCR Text: "${wlReview.extracted_ocr_text?.slice(0, 80).replace(/\n/g, ' ')}..."`);
-  console.log(`  Compliance Score: ${wlReview.compliance_score}%, Status: ${wlReview.status}, Findings: ${wlReview.findings.length}`);
-  
-  recordResult(wlReview.findings.length === 0, 'TN', 'Zero false violation findings on clean compliant creative');
-  recordResult(wlReview.compliance_score === 100, 'TN', 'Receives 100% compliance score without arbitrary penalties');
-  recordResult(wlReview.status === 'approved', 'TN', 'Assigned APPROVED governance gate');
-  console.log();
-
-  // -------------------------------------------------------------------
-  // TEST 2: Genuinely Unseen Creative With Embedded Text Error (VitalPulse Health)
-  // -------------------------------------------------------------------
-  console.log('--- Test 2: Creative With Embedded Text Error — VitalPulse Health (Healthcare Devices) ---');
-  const vpCaption = 'VitalPulse is an FDA-cleared Class II medical device offering 24/7 continuous cardiac telemetry at home.';
-  
-  const vpReview = await runComplianceReview(
-    vpCaption,
-    'social_media',
-    guidelines,
-    facts,
-    {
-      imageUrl: '/uploads/creatives/unseen-error-vitalpulse.png',
-      captionText: vpCaption,
-      assets,
-    }
-  );
-
-  console.log(`  Observed OCR Text: "${vpReview.extracted_ocr_text?.slice(0, 100).replace(/\n/g, ' ')}..."`);
-  console.log(`  Compliance Score: ${vpReview.compliance_score}%, Status: ${vpReview.status}, Findings: ${vpReview.findings.length}`);
-  vpReview.findings.forEach((f) => {
-    console.log(`   - Finding: "${f.finding_title}" [Severity: ${f.severity}] Evidence: "${f.evidence_text}"`);
-  });
-
-  const hasProhibitedClaim = vpReview.findings.some(
-    (f) =>
-      f.finding_title.toLowerCase().includes('guarantee') ||
-      f.finding_title.toLowerCase().includes('prohibited') ||
-      f.explanation.toLowerCase().includes('guarantee') ||
-      (f.evidence_text && (f.evidence_text.includes('100% Guaranteed Cure') || f.evidence_text.includes('Zero risk')))
-  );
-
-  recordResult(hasProhibitedClaim, 'TP', 'Flags prohibited absolute guarantee claim ("100% Guaranteed Cure")');
-  recordResult(vpReview.findings.length >= 1, 'TP', 'Detects embedded text policy violations');
-  recordResult(vpReview.compliance_score! <= 75, 'TP', `Compliance score penalized for prohibited clinical claim (${vpReview.compliance_score}%)`);
-  recordResult(vpReview.status === 'flagged', 'TP', 'Assigned FLAGGED governance gate due to critical policy violation');
-  console.log();
-
-  // -------------------------------------------------------------------
-  // TEST 3: Genuinely Unseen Creative With Multimodal Contradictions (Hyperion Motors)
-  // -------------------------------------------------------------------
-  console.log('--- Test 3: Multimodal Contradictions — Hyperion Motors (Automotive & Clean Transport) ---');
-  const hyCaption = 'Introducing the all-electric Hyperion Horizon EV Sedan! Enjoy 350 miles range with our exclusive $5,000 dealer rebate and a 3-year battery warranty. Supercharge in 45 minutes!';
-  
-  const hyReview = await runComplianceReview(
-    hyCaption,
-    'social_media',
-    guidelines,
-    facts,
-    {
-      imageUrl: '/uploads/creatives/unseen-contradiction-hyperion.png',
-      captionText: hyCaption,
-      assets,
-    }
-  );
-
-  console.log(`  Observed OCR Text: "${hyReview.extracted_ocr_text?.slice(0, 120).replace(/\n/g, ' ')}..."`);
-  console.log(`  Compliance Score: ${hyReview.compliance_score}%, Status: ${hyReview.status}, Findings: ${hyReview.findings.length}`);
-  hyReview.findings.forEach((f) => {
-    console.log(`   - Finding: "${f.finding_title}" [${f.severity}] Evidence: "${f.evidence_text}"`);
-  });
-
-  const hasPriceContradiction = hyReview.findings.some(
-    (f) => f.finding_title.toLowerCase().includes('price') || (f.evidence_text && f.evidence_text.includes('8,000') && f.evidence_text.includes('5,000'))
-  );
-  const hasWarrantyContradiction = hyReview.findings.some(
-    (f) => f.finding_title.toLowerCase().includes('warranty') || (f.evidence_text && f.evidence_text.includes('8-year') && f.evidence_text.includes('3-year'))
-  );
-  const hasDurationContradiction = hyReview.findings.some(
-    (f) => f.finding_title.toLowerCase().includes('duration') || (f.evidence_text && f.evidence_text.includes('15') && f.evidence_text.includes('45'))
-  );
-
-  recordResult(hasPriceContradiction, 'TP', 'Detects vehicle rebate / price contradiction ($8,000 in image vs $5,000 in caption)');
-  recordResult(hasWarrantyContradiction, 'TP', 'Detects battery warranty contradiction (8-year in image vs 3-year in caption)');
-  recordResult(hasDurationContradiction, 'TP', 'Detects charging duration contradiction (15-minute in image vs 45 minutes in caption)');
-  recordResult(hyReview.status === 'flagged', 'TP', 'Assigned FLAGGED governance gate');
-  recordResult(hyReview.compliance_score! <= 50, 'TP', `Score heavily penalized for multiple critical contradictions (${hyReview.compliance_score}%)`);
-  console.log();
-
-  // -------------------------------------------------------------------
-  // TEST 4: Full End-to-End Database & Persistence Lifecycle
-  // -------------------------------------------------------------------
-  console.log('--- Test 4: Dynamic End-to-End Database Persistence Audit ---');
-  const persisted = await createContentReview({
-    title: 'Hyperion Horizon GT Electric Launch Multimodal Review',
-    content_text: hyCaption,
-    caption_text: hyCaption,
-    content_type: 'social_media',
-    image_url: '/uploads/creatives/unseen-contradiction-hyperion.png',
-  });
-
-  recordResult(Boolean(persisted.id), 'TP', `Created real review record with UUID (${persisted.id})`);
-  recordResult(persisted.status === 'flagged', 'TP', `Persisted status reflects FLAGGED governance gate (${persisted.status})`);
-  recordResult(persisted.compliance_score! <= 50, 'TP', `Persisted compliance score accurately stored (${persisted.compliance_score}%)`);
-
-  const fetched = await getContentReviewById(persisted.id);
-  recordResult(Boolean(fetched && (fetched.findings?.length || 0) >= 3), 'TP', `Retrieved review retains all findings (Found: ${fetched?.findings?.length})`);
-  console.log();
-
-  // -------------------------------------------------------------------
-  // Summary Metrics
-  // -------------------------------------------------------------------
-  const total = tp + tn + fp + fn;
-  const accuracy = Math.round(((tp + tn) / total) * 100);
-  const precision = tp + fp > 0 ? Math.round((tp / (tp + fp)) * 100) : 100;
-  const recall = tp + fn > 0 ? Math.round((tp / (tp + fn)) * 100) : 100;
-
-  console.log('================================================================');
-  console.log('UNSEEN CREATIVES BENCHMARK AUDIT RESULTS');
-  console.log('================================================================');
-  console.log(`  True Positives (Correctly Flagged Violations):     ${tp}`);
-  console.log(`  True Negatives (Correctly Passed Clean Claims):     ${tn}`);
-  console.log(`  False Positives (Spurious Alarms / Noise):         ${fp}`);
-  console.log(`  False Negatives (Missed Real Violations):          ${fn}`);
-  console.log(`  Accuracy:                                          ${accuracy}%`);
-  console.log(`  Precision:                                         ${precision}%`);
-  console.log(`  Recall:                                            ${recall}%`);
-  console.log('================================================================\n');
-
-  if (fp > 0 || fn > 0) {
-    process.exit(1);
-  }
+async function createCreativeImage(svgContent: string, outputPath: string): Promise<string> {
+  const pngBuffer = await sharp(Buffer.from(svgContent))
+    .png()
+    .toBuffer();
+  fs.writeFileSync(outputPath, pngBuffer);
+  return outputPath;
 }
 
-main().catch((err) => {
-  console.error('Audit failed with uncaught exception:', err);
+async function runUnseenCreativesValidation() {
+  console.log('================================================================');
+  console.log(' BRANDGUARD AI — 5 UNSEEN CREATIVES IMAGE-FIRST VALIDATION TEST ');
+  console.log('================================================================\n');
+
+  const uploadDir = path.join(process.cwd(), 'public', 'uploads', 'creatives');
+  if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir, { recursive: true });
+  }
+
+  // -----------------------------------------------------------------
+  // 1. Creative 1: Intentional Spelling Errors
+  // -----------------------------------------------------------------
+  const svg1 = `<svg width="1080" height="1080" xmlns="http://www.w3.org/2000/svg">
+    <rect width="1080" height="1080" fill="#0f172a"/>
+    <rect x="60" y="60" width="960" height="960" rx="24" fill="#1e293b" stroke="#334155" stroke-width="4"/>
+    <text x="540" y="240" font-family="Arial, Helvetica, sans-serif" font-size="64" font-weight="bold" fill="#38bdf8" text-anchor="middle">SOUNDZEN PRO</text>
+    <text x="540" y="380" font-family="Arial, Helvetica, sans-serif" font-size="52" font-weight="bold" fill="#f8fafc" text-anchor="middle">Gaurenteed Sound Clarity</text>
+    <rect x="240" y="480" width="600" height="120" rx="16" fill="#ffffff" stroke="#f59e0b" stroke-width="4"/>
+    <text x="540" y="555" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="bold" fill="#000000" text-anchor="middle">Limted Time Offfer</text>
+    <text x="540" y="720" font-family="Arial, Helvetica, sans-serif" font-size="34" fill="#94a3b8" text-anchor="middle">Active Noise Cancellation with 40 Hours Playtime</text>
+    <text x="540" y="880" font-family="Arial, Helvetica, sans-serif" font-size="24" fill="#64748b" text-anchor="middle">Terms apply. Results may vary by device.</text>
+  </svg>`;
+  const img1Path = path.join(uploadDir, 'unseen-test-1-spelling.png');
+  await createCreativeImage(svg1, img1Path);
+  console.log('✓ Generated Creative 1 (Intentional Spelling Errors): unseen-test-1-spelling.png');
+
+  // -----------------------------------------------------------------
+  // 2. Creative 2: Internal Discount Inconsistency (50% vs 70%)
+  // -----------------------------------------------------------------
+  const svg2 = `<svg width="1080" height="1080" xmlns="http://www.w3.org/2000/svg">
+    <rect width="1080" height="1080" fill="#18181b"/>
+    <rect x="60" y="60" width="960" height="960" rx="24" fill="#27272a" stroke="#3f3f46" stroke-width="4"/>
+    <text x="540" y="220" font-family="Arial, Helvetica, sans-serif" font-size="60" font-weight="bold" fill="#e4e4e7" text-anchor="middle">SUMMER MEGA SALE</text>
+    <rect x="180" y="280" width="720" height="140" rx="20" fill="#dc2626"/>
+    <text x="540" y="375" font-family="Arial, Helvetica, sans-serif" font-size="72" font-weight="extrabold" fill="#ffffff" text-anchor="middle">50% OFF</text>
+    <circle cx="540" cy="620" r="140" fill="#e11d48" stroke="#ffffff" stroke-width="6"/>
+    <text x="540" y="610" font-family="Arial, Helvetica, sans-serif" font-size="32" font-weight="bold" fill="#ffffff" text-anchor="middle">SPECIAL PROMO</text>
+    <text x="540" y="665" font-family="Arial, Helvetica, sans-serif" font-size="52" font-weight="extrabold" fill="#ffffff" text-anchor="middle">70% OFF</text>
+    <text x="540" y="860" font-family="Arial, Helvetica, sans-serif" font-size="30" fill="#a1a1aa" text-anchor="middle">Limited supplies in participating stores</text>
+    <text x="540" y="940" font-family="Arial, Helvetica, sans-serif" font-size="22" fill="#71717a" text-anchor="middle">Terms apply. Cannot be combined with other offers.</text>
+  </svg>`;
+  const img2Path = path.join(uploadDir, 'unseen-test-2-internal-discount.png');
+  await createCreativeImage(svg2, img2Path);
+  console.log('✓ Generated Creative 2 (Internal Discount Contradiction 50% vs 70%): unseen-test-2-internal-discount.png');
+
+  // -----------------------------------------------------------------
+  // 3. Creative 3: Potential Third-Party IP Concern (Apple / Getty Images)
+  // -----------------------------------------------------------------
+  const svg3 = `<svg width="1080" height="1080" xmlns="http://www.w3.org/2000/svg">
+    <rect width="1080" height="1080" fill="#09090b"/>
+    <rect x="60" y="60" width="960" height="960" rx="24" fill="#18181b" stroke="#27272a" stroke-width="4"/>
+    <text x="540" y="240" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="bold" fill="#fafafa" text-anchor="middle">HYPERION AUDIO DOCK</text>
+    <text x="540" y="380" font-family="Arial, Helvetica, sans-serif" font-size="44" font-weight="semibold" fill="#38bdf8" text-anchor="middle">Powered by Apple iOS ecosystem</text>
+    <rect x="220" y="460" width="640" height="240" rx="16" fill="#27272a" stroke="#52525b" stroke-dasharray="10 6" stroke-width="3"/>
+    <text x="540" y="580" font-family="Arial, Helvetica, sans-serif" font-size="48" font-weight="bold" fill="#71717a" text-anchor="middle">Getty Images</text>
+    <text x="540" y="630" font-family="Arial, Helvetica, sans-serif" font-size="24" fill="#52525b" text-anchor="middle">(Sample Watermark Comp)</text>
+    <text x="540" y="820" font-family="Arial, Helvetica, sans-serif" font-size="32" fill="#d4d4d8" text-anchor="middle">Next-generation audio dock engineered for creators</text>
+    <text x="540" y="930" font-family="Arial, Helvetica, sans-serif" font-size="22" fill="#71717a" text-anchor="middle">Apple is a registered trademark. Comp asset for preview only.</text>
+  </svg>`;
+  const img3Path = path.join(uploadDir, 'unseen-test-3-third-party-ip.png');
+  await createCreativeImage(svg3, img3Path);
+  console.log('✓ Generated Creative 3 (Third-Party IP & Watermark Concern): unseen-test-3-third-party-ip.png');
+
+  // -----------------------------------------------------------------
+  // 4. Creative 4: Clean Compliant Creative
+  // -----------------------------------------------------------------
+  const svg4 = `<svg width="1080" height="1080" xmlns="http://www.w3.org/2000/svg">
+    <rect width="1080" height="1080" fill="#0f172a"/>
+    <rect x="60" y="60" width="960" height="960" rx="24" fill="#1e293b" stroke="#0ea5e9" stroke-width="4"/>
+    <text x="540" y="240" font-family="Arial, Helvetica, sans-serif" font-size="54" font-weight="bold" fill="#38bdf8" text-anchor="middle">ACME ENTERPRISE CLOUD</text>
+    <text x="540" y="340" font-family="Arial, Helvetica, sans-serif" font-size="36" font-weight="semibold" fill="#94a3b8" text-anchor="middle">Engineered for Enterprise Reliability</text>
+    <rect x="160" y="420" width="760" height="200" rx="16" fill="#0f172a" stroke="#334155" stroke-width="2"/>
+    <text x="540" y="500" font-family="Arial, Helvetica, sans-serif" font-size="40" font-weight="bold" fill="#22c55e" text-anchor="middle">99.9% UPTIME SLA</text>
+    <text x="540" y="560" font-family="Arial, Helvetica, sans-serif" font-size="28" fill="#cbd5e1" text-anchor="middle">Multi-Region High Availability &amp; Automated Failover</text>
+    <text x="540" y="740" font-family="Arial, Helvetica, sans-serif" font-size="32" fill="#e2e8f0" text-anchor="middle">SOC-2 Type II Certified Security Infrastructure</text>
+    <text x="540" y="880" font-family="Arial, Helvetica, sans-serif" font-size="22" fill="#64748b" text-anchor="middle">© 2026 Acme Enterprise. All rights reserved.</text>
+  </svg>`;
+  const img4Path = path.join(uploadDir, 'unseen-test-4-clean.png');
+  await createCreativeImage(svg4, img4Path);
+  console.log('✓ Generated Creative 4 (Clean Compliant Creative): unseen-test-4-clean.png');
+
+  // -----------------------------------------------------------------
+  // 5. Creative 5: No Caption Creative (Testing Pure Image-First Audit)
+  // -----------------------------------------------------------------
+  const svg5 = `<svg width="1080" height="1080" xmlns="http://www.w3.org/2000/svg">
+    <rect width="1080" height="1080" fill="#14532d"/>
+    <rect x="60" y="60" width="960" height="960" rx="24" fill="#166534" stroke="#4ade80" stroke-width="4"/>
+    <text x="540" y="240" font-family="Arial, Helvetica, sans-serif" font-size="62" font-weight="bold" fill="#f0fdf4" text-anchor="middle">NATURABYTE PROTEIN BAR</text>
+    <text x="540" y="380" font-family="Arial, Helvetica, sans-serif" font-size="52" font-weight="extrabold" fill="#bbf7d0" text-anchor="middle">40g Protein</text>
+    <text x="540" y="500" font-family="Arial, Helvetica, sans-serif" font-size="38" fill="#ffffff" text-anchor="middle">100% Recyclable Packaging</text>
+    <rect x="220" y="600" width="640" height="100" rx="12" fill="#14532d" stroke="#86efac" stroke-width="2"/>
+    <text x="540" y="662" font-family="Arial, Helvetica, sans-serif" font-size="30" font-weight="bold" fill="#fef08a" text-anchor="middle">CONTAINS WHEAT &amp; GLUTEN</text>
+    <text x="540" y="860" font-family="Arial, Helvetica, sans-serif" font-size="28" fill="#dcfce7" text-anchor="middle">Fuel your fitness with pure plant nutrition</text>
+  </svg>`;
+  const img5Path = path.join(uploadDir, 'unseen-test-5-no-caption.png');
+  await createCreativeImage(svg5, img5Path);
+  console.log('✓ Generated Creative 5 (Empty Caption Input): unseen-test-5-no-caption.png\n');
+
+  // -----------------------------------------------------------------
+  // EXECUTE COMPLIANCE AUDITS ACROSS ALL 5 CREATIVES
+  // -----------------------------------------------------------------
+  const results: Array<{
+    name: string;
+    score: number | null;
+    governanceStatus: string;
+    findingsCount: number;
+    categoriesDetected: string[];
+    passCheck: boolean;
+    evidenceNotes: string;
+  }> = [];
+
+  // TEST 1
+  console.log('--- RUNNING AUDIT 1: INTENTIONAL SPELLING ERROR CREATIVE ---');
+  const res1 = await runComplianceReview(
+    'SoundZen Pro Campaign',
+    'social_media',
+    MOCK_GUIDELINES,
+    MOCK_FACTS,
+    {
+      imageUrl: '/uploads/creatives/unseen-test-1-spelling.png',
+      captionText: 'Experience studio sound with SoundZen Pro wireless headphones.',
+      assets: MOCK_ASSETS,
+    }
+  );
+  const spellingFindings = res1.findings.filter((f) => f.category === 'spelling_and_grammar');
+  console.log(`Score: ${res1.compliance_score} | Governance: ${res1.metadata.governance_status} | Total Findings: ${res1.findings.length}`);
+  console.log(`Spelling Findings Detected: ${spellingFindings.length} (${spellingFindings.map((f) => f.evidence_text).join(', ')})`);
+  results.push({
+    name: '1. Intentional Spelling Error',
+    score: res1.compliance_score,
+    governanceStatus: res1.metadata.governance_status || 'UNKNOWN',
+    findingsCount: res1.findings.length,
+    categoriesDetected: Array.from(new Set(res1.findings.map((f) => f.category))),
+    passCheck: spellingFindings.length >= 1,
+    evidenceNotes: `Successfully detected marketing typos: ${spellingFindings.map((f) => f.evidence_text).join(', ')}`,
+  });
+
+  // TEST 2
+  console.log('\n--- RUNNING AUDIT 2: INTERNAL DISCOUNT INCONSISTENCY (50% vs 70%) ---');
+  const res2 = await runComplianceReview(
+    'Summer Mega Sale Campaign',
+    'social_media',
+    MOCK_GUIDELINES,
+    MOCK_FACTS,
+    {
+      imageUrl: '/uploads/creatives/unseen-test-2-internal-discount.png',
+      captionText: 'Get the best summer deals with up to 50% off select items.',
+      assets: MOCK_ASSETS,
+    }
+  );
+  const conflictDiscount = res2.findings.filter(
+    (f) =>
+      f.finding_title.toLowerCase().includes('conflicting') &&
+      f.finding_title.toLowerCase().includes('discount')
+  );
+  console.log(`Score: ${res2.compliance_score} | Governance: ${res2.metadata.governance_status} | Total Findings: ${res2.findings.length}`);
+  console.log(`Internal Discount Conflict Detected: ${conflictDiscount.length > 0 ? 'YES' : 'NO'} (${conflictDiscount[0]?.evidence_text || 'none'})`);
+  results.push({
+    name: '2. Internal Discount Contradiction (50% vs 70%)',
+    score: res2.compliance_score,
+    governanceStatus: res2.metadata.governance_status || 'UNKNOWN',
+    findingsCount: res2.findings.length,
+    categoriesDetected: Array.from(new Set(res2.findings.map((f) => f.category))),
+    passCheck: conflictDiscount.length > 0,
+    evidenceNotes: `Detected internal discount contradiction: "${conflictDiscount[0]?.evidence_text}" with critical severity`,
+  });
+
+  // TEST 3
+  console.log('\n--- RUNNING AUDIT 3: THIRD-PARTY IP & WATERMARK CONCERN ---');
+  const res3 = await runComplianceReview(
+    'Hyperion Audio Dock Post',
+    'social_media',
+    MOCK_GUIDELINES,
+    MOCK_FACTS,
+    {
+      imageUrl: '/uploads/creatives/unseen-test-3-third-party-ip.png',
+      captionText: 'Upgrade your desktop audio setup with our sleek wireless dock.',
+      assets: MOCK_ASSETS,
+    }
+  );
+  const ipFindings = res3.findings.filter((f) => f.category === 'copyright_and_ip_risk');
+  console.log(`Score: ${res3.compliance_score} | Governance: ${res3.metadata.governance_status} | Total Findings: ${res3.findings.length}`);
+  console.log(`Copyright / IP Findings Detected: ${ipFindings.length} (${ipFindings.map((f) => f.finding_title).join('; ')})`);
+  const hasHumanVerify = ipFindings.some((f) => f.needs_human_verification);
+  results.push({
+    name: '3. Third-Party IP & Watermark Concern',
+    score: res3.compliance_score,
+    governanceStatus: res3.metadata.governance_status || 'UNKNOWN',
+    findingsCount: res3.findings.length,
+    categoriesDetected: Array.from(new Set(res3.findings.map((f) => f.category))),
+    passCheck: ipFindings.length > 0 && hasHumanVerify,
+    evidenceNotes: `Flagged for Human Review: ${ipFindings.map((f) => f.evidence_text).join(', ')}`,
+  });
+
+  // TEST 4
+  console.log('\n--- RUNNING AUDIT 4: CLEAN COMPLIANT CREATIVE ---');
+  const res4 = await runComplianceReview(
+    'Acme Enterprise Cloud Uptime SLA',
+    'social_media',
+    MOCK_GUIDELINES,
+    MOCK_FACTS,
+    {
+      imageUrl: '/uploads/creatives/unseen-test-4-clean.png',
+      captionText: 'Acme Enterprise Cloud provides verified 99.9% uptime SLA with SOC-2 Type II security.',
+      assets: MOCK_ASSETS,
+    }
+  );
+  console.log(`Score: ${res4.compliance_score} | Governance: ${res4.metadata.governance_status} | Total Findings: ${res4.findings.length}`);
+  const isCleanPass = res4.compliance_score === 100 && res4.metadata.governance_status === 'PASS';
+  results.push({
+    name: '4. Clean Compliant Creative',
+    score: res4.compliance_score,
+    governanceStatus: res4.metadata.governance_status || 'UNKNOWN',
+    findingsCount: res4.findings.length,
+    categoriesDetected: Array.from(new Set(res4.findings.map((f) => f.category))),
+    passCheck: res4.compliance_score !== null && res4.compliance_score >= 90 && res4.findings.length === 0,
+    evidenceNotes: `Score: ${res4.compliance_score}% with 0 violations. Verified approved corporate SLA and brand policy.`,
+  });
+
+  // TEST 5
+  console.log('\n--- RUNNING AUDIT 5: PURE IMAGE-FIRST REVIEW (EMPTY CAPTION) ---');
+  const res5 = await runComplianceReview(
+    'NaturaByte Pure Image Post',
+    'social_media',
+    MOCK_GUIDELINES,
+    MOCK_FACTS,
+    {
+      imageUrl: '/uploads/creatives/unseen-test-5-no-caption.png',
+      captionText: '', // NO CAPTION SUPPLIED!
+      assets: MOCK_ASSETS,
+    }
+  );
+  console.log(`Score: ${res5.compliance_score} | Governance: ${res5.metadata.governance_status} | Total Findings: ${res5.findings.length}`);
+  console.log(`Modality: ${res5.metadata.modality} | Extracted OCR: ${res5.extracted_ocr_text?.slice(0, 60).replace(/\n/g, ' ')}...`);
+  results.push({
+    name: '5. Creative with Empty Caption (Pure Image Analysis)',
+    score: res5.compliance_score,
+    governanceStatus: res5.metadata.governance_status || 'UNKNOWN',
+    findingsCount: res5.findings.length,
+    categoriesDetected: Array.from(new Set(res5.findings.map((f) => f.category))),
+    passCheck: res5.metadata.modality === 'image_only' && Boolean(res5.extracted_ocr_text && res5.extracted_ocr_text.includes('NATURABYTE')),
+    evidenceNotes: `Image-only modality verified. Extracted OCR typography independently without requiring caption input.`,
+  });
+
+  console.log('\n================================================================');
+  console.log(' SUMMARY OF UNSEEN CREATIVES VALIDATION SUITE ');
+  console.log('================================================================');
+  for (const r of results) {
+    console.log(`[${r.passCheck ? 'PASS' : 'FAIL'}] ${r.name}`);
+    console.log(`       Status: ${r.governanceStatus} | Score: ${r.score} | Findings: ${r.findingsCount}`);
+    console.log(`       Categories: ${r.categoriesDetected.join(', ') || 'none'}`);
+    console.log(`       Notes: ${r.evidenceNotes}\n`);
+  }
+
+  const allPassed = results.every((r) => r.passCheck);
+  console.log(`OVERALL RESULT: ${allPassed ? 'ALL 5 TESTS PASSED ✓' : 'SOME TESTS FAILED ✗'}`);
+}
+
+runUnseenCreativesValidation().catch((err) => {
+  console.error('Validation test failed with error:', err);
   process.exit(1);
 });

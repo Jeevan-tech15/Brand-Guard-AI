@@ -259,16 +259,36 @@ export async function runComplianceReview(
   });
 
   // 9. Determine Resulting Governance Status
-  // Automated engine must never auto-approve content. Zero automated violations transitions
-  // content to 'in_review' awaiting explicit reviewer signoff.
-  let status: ReviewStatus = 'in_review';
+  // Automated engine distinguishes PASS, WARNING, REVIEW REQUIRED, and ANALYSIS INCOMPLETE.
+  // Content with 0 violations transitions to 'in_review' awaiting explicit human reviewer signoff.
   const hasCritical = allFindings.some((f) => f.severity === 'critical');
   const hasHigh = allFindings.some((f) => f.severity === 'high');
+  const hasHumanReviewRequired = allFindings.some(
+    (f) => f.needs_human_verification || f.category === 'copyright_and_ip_risk'
+  );
 
-  if (hasCritical || hasHigh) {
+  let governance_status: 'PASS' | 'WARNING' | 'REVIEW REQUIRED' | 'ANALYSIS INCOMPLETE' = 'PASS';
+
+  if (
+    scoreBreakdown.isPartialAnalysis ||
+    (hasImage && !imageInspectionSucceeded) ||
+    (hasImage && !extractedOcrText && !hasCaption)
+  ) {
+    governance_status = 'ANALYSIS INCOMPLETE';
+  } else if (hasCritical || hasHigh || hasHumanReviewRequired) {
+    governance_status = 'REVIEW REQUIRED';
+  } else if (allFindings.length > 0 || (scoreBreakdown.finalScore !== null && scoreBreakdown.finalScore < 90)) {
+    governance_status = 'WARNING';
+  } else {
+    governance_status = 'PASS';
+  }
+
+  let status: ReviewStatus = 'in_review';
+  if (governance_status === 'ANALYSIS INCOMPLETE') {
+    status = 'pending';
+  } else if (hasCritical || hasHigh) {
     status = 'flagged';
   } else {
-    // 0 violations or minor warnings: ready for human reviewer signoff
     status = 'in_review';
   }
 
@@ -295,6 +315,8 @@ export async function runComplianceReview(
       factsEvaluatedCount: activeFacts.length,
       scoringBreakdown: scoreBreakdown,
       extracted_ocr_text: extractedOcrText || undefined,
+      governance_status,
+      analysisStatus: governance_status === 'ANALYSIS INCOMPLETE' ? 'partial' : 'complete',
       checksCompleted: {
         imageAnalysis: imageInspectionSucceeded,
         captionAnalysis: hasCaption,

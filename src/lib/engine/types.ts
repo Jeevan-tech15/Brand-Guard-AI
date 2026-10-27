@@ -20,6 +20,9 @@ export interface EngineFinding {
   image_evidence?: string | null;
   proposed_replacement?: string | null;
   resolution_status?: 'unresolved' | 'resolved' | 'overridden';
+  needs_human_verification?: boolean;
+  human_verification_reason?: string | null;
+  uncertainty_notes?: string | null;
 }
 
 export interface ScoreDeduction {
@@ -80,6 +83,8 @@ export interface EngineMetadata {
   extracted_ocr_text?: string;
   isPartialAnalysis?: boolean;
   analysisNotes?: string;
+  governance_status?: 'PASS' | 'WARNING' | 'REVIEW REQUIRED' | 'ANALYSIS INCOMPLETE';
+  analysisStatus?: 'clean' | 'partial' | 'failed' | 'complete';
 }
 
 export interface ComplianceReviewResult {

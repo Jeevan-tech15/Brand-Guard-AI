@@ -1,5 +1,11 @@
 import { BrandGuideline, ApprovedFact, AuthorizedAsset, RuleSeverity, BoundingBox, ImageSummaryStats } from '@/lib/types';
 import { EngineFinding } from './types';
+import {
+  auditImageTextAndTypography,
+  auditImageVisualAndDesignQuality,
+  auditImageCopyrightAndIpRisks,
+  auditImageBrandAndMarketingClaims,
+} from './image-first-analyzer';
 import fs from 'fs';
 import path from 'path';
 import sharp from 'sharp';
@@ -645,16 +651,28 @@ ${captionText || '(None provided)'}
 
 === STAGE 1: IMAGE-ONLY GOVERNANCE AUDIT INSTRUCTIONS ===
 1. Transcribe all text visibly rendered in the creative image into "extracted_ocr_text" accurately.
-2. Inspect the uploaded creative image independently for:
-   a) Visible spelling/grammar errors in image typography.
-   b) Malformed, distorted, or illegible text (e.g. poor contrast, pixelation, overlapping text).
-   c) Conflicting claims within the image itself (e.g. multiple conflicting discount percentages like 60% vs 50%, conflicting durations, or contradictory statements within the asset).
-   d) Product claims & suspicious absolutes in image (e.g. "100% cure", "zero risk", "completely eliminate", "unhackable").
-   e) Visual layout defects (overlap, text clipping, bad alignment, contrast failures, typography distortion).
-   f) Violations of active brand guidelines, verified corporate facts, and authorized visual assets.
-3. Distinguish objectively detected errors from unverified risks. Do not invent defects.
-4. For every genuine violation detected, return:
-   - "category": string (e.g. "prohibited_claim", "voice_and_tone", "spelling_and_grammar", "visual_design_observation", "layout", "color_palette", "logo_integrity", "unsubstantiated_claim", "unreadable_content", "cross_modal_conflict")
+2. Inspect the uploaded creative image independently across the 4 Image-First pillars:
+   PILLAR A: Spelling, Text & Typography ("spelling_and_grammar")
+   - Likely spelling mistakes, typos, duplicated words/figures (e.g. "50% 50%"), malformed words, obvious grammatical errors.
+   - Text cut off, unreadable, overlapping, poorly aligned.
+   - Preserve exact extracted text and visual location.
+
+   PILLAR B: Visual & Design Quality ("visual_design_quality")
+   - Layout problems, text clipping, poor contrast, alignment problems, distorted logos, pixelation/low resolution.
+   - Mandatory disclaimers or promotional conditions that appear visually obscured or illegible.
+
+   PILLAR C: Copyright & Intellectual-Property Risks ("copyright_and_ip_risk")
+   - Commercial stock watermarks (Getty, Shutterstock, iStock, Adobe Stock, Alamy, etc.).
+   - Recognizable third-party logos, trademarks, or characters (Apple, Nike, Disney, Coca-Cola, etc.) not in authorized brand assets.
+   - Flag potential similarity or ownership concerns for HUMAN REVIEW. Explain that copyright/trademark infringement cannot be established from pixels alone.
+
+   PILLAR D: Brand & Marketing Claims Visible in Image ("brand_marketing_claim")
+   - Contradictory claims within the image itself (e.g. 50% OFF in one area vs 70% OFF in another, or conflicting prices/specs/durations).
+   - Suspicious absolute guarantees (e.g. "100% cure", "zero risk", "completely eliminate", "unhackable").
+   - Violations of active brand guidelines and verified corporate facts.
+
+3. For every genuine violation detected, return:
+   - "category": "spelling_and_grammar" | "visual_design_quality" | "copyright_and_ip_risk" | "brand_marketing_claim" | "cross_modal_conflict"
    - "severity": "low" | "medium" | "high" | "critical"
    - "finding_title": short clear title
    - "explanation": evidence-backed explanation citing the specific visual defect, rule, or claim
@@ -663,6 +681,9 @@ ${captionText || '(None provided)'}
    - "bounding_box": object with "ymin", "xmin", "ymax", "xmax" normalized from 0 to 1000 representing the region of the violation on the image. ONLY provide bounding boxes where detection is genuinely localized.
    - "suggested_fix": actionable concrete fix
    - "confidence": number between 0.0 and 1.0 based on certainty
+   - "needs_human_verification": boolean (true for potential IP risks, copyright concerns, or subjective claims)
+   - "human_verification_reason": string or null
+   - "uncertainty_notes": string or null
    - "guideline_id": matching guideline UUID from above, or null
    - "fact_id": matching fact UUID from above, or null
    - "asset_id": matching asset UUID from above, or null
@@ -785,6 +806,9 @@ If there are no violations, return { "extracted_ocr_text": "...", "findings": []
               image_evidence: evText,
               caption_evidence: null,
               resolution_status: 'unresolved' as const,
+              needs_human_verification: Boolean(f.needs_human_verification),
+              human_verification_reason: typeof f.human_verification_reason === 'string' ? f.human_verification_reason : null,
+              uncertainty_notes: typeof f.uncertainty_notes === 'string' ? f.uncertainty_notes : null,
             };
           });
 
@@ -828,13 +852,29 @@ If there are no violations, return { "extracted_ocr_text": "...", "findings": []
     imageSummary.textLineCount = ocrResult.linesCount;
   }
 
-  // 6. Generic Heuristic Layout & Legibility Observations
+  // 6. Direct Image-First Audits across the 4 Core Pillars
   const localFindings: EngineFinding[] = [];
+
+  // Pillar A: Spelling, Text & Typography
+  const typographyFindings = auditImageTextAndTypography(ocrResult.text, ocrResult.boundingBoxes);
+  localFindings.push(...typographyFindings);
+
+  // Pillar B: Visual & Design Quality
+  const visualFindings = auditImageVisualAndDesignQuality(imageSummary, ocrResult.text, ocrResult.boundingBoxes);
+  localFindings.push(...visualFindings);
+
+  // Pillar C: Copyright & Intellectual Property Risks
+  const copyrightFindings = auditImageCopyrightAndIpRisks(ocrResult.text, activeAssets);
+  localFindings.push(...copyrightFindings);
+
+  // Pillar D: Brand & Marketing Claims in Image (Internal contradictions, absolutes, guidelines, facts)
+  const claimsFindings = auditImageBrandAndMarketingClaims(ocrResult.text, activeGuidelines, activeFacts);
+  localFindings.push(...claimsFindings);
 
   // Check 6b: Legibility & Unreadable Content Observation
   if (ocrResult.unreadableCount >= 5 && ocrResult.linesCount < 2) {
     localFindings.push({
-      category: 'unreadable_content',
+      category: 'visual_design_quality',
       severity: 'low',
       finding_title: 'Degraded Typography / Low Contrast Detected',
       explanation: `Image contains multiple text-like regions with degraded contrast or low OCR recognition confidence (<45%). Manual visual inspection is recommended to verify legibility across mobile screens.`,
@@ -846,6 +886,8 @@ If there are no violations, return { "extracted_ocr_text": "...", "findings": []
       target_type: 'layout',
       target_scope: 'image',
       resolution_status: 'unresolved',
+      needs_human_verification: true,
+      human_verification_reason: 'Inspect typography readability against background colors on mobile screens.',
     });
   }
 
@@ -859,7 +901,11 @@ If there are no violations, return { "extracted_ocr_text": "...", "findings": []
   if (!ocrResult.text) {
     disclosures.push('No legible typography was detected in this creative image.');
   } else {
-    disclosures.push('Local OCR typography analysis and deterministic rules engine active.');
+    disclosures.push('Local Image-First audit active across Typography, Visual Quality, Copyright/IP heuristics, and Claims.');
+  }
+
+  if (!apiKey) {
+    disclosures.push('Cloud AI Vision provider not configured. Complex visual layout and trademark evaluation executed via local deterministic heuristics and flagged for human review.');
   }
 
   return {
