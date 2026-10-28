@@ -50,7 +50,8 @@ export async function GET() {
       error: dbError,
     },
     llmEngine: {
-      status: 'standby',
+      status: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) ? 'active' : 'standby',
+      geminiKeyConfigured: Boolean(process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY),
       phase: 'ready_for_phase_2',
       note: 'Server-side LLM review engine will evaluate content against active brand guidelines and approved facts.',
     },

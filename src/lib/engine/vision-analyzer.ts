@@ -1,8 +1,20 @@
-import { BrandGuideline, ApprovedFact, AuthorizedAsset, RuleSeverity, BoundingBox, ImageSummaryStats, FindingCategory } from '@/lib/types';
+import {
+  BrandGuideline,
+  ApprovedFact,
+  AuthorizedAsset,
+  RuleSeverity,
+  BoundingBox,
+  ImageSummaryStats,
+  FindingCategory,
+  LogoPresenceResult,
+  LogoInspectionDetails,
+} from '@/lib/types';
 import { EngineFinding } from './types';
 import {
   auditImageTextAndTypography,
   auditImageLogoAndBrandIdentity,
+  inspectLogoPresenceAndIdentity,
+  evaluateLogoPolicyRequirements,
   auditImageAbusiveOrHarmfulLanguage,
   auditImageVisualAndDesignQuality,
   auditImageBrandAndMarketingClaims,
@@ -24,6 +36,8 @@ export interface VisionAnalysisResult {
   unreadableSegmentsCount?: number;
   imageSummary?: ImageSummaryStats | null;
   boundingBoxes?: Array<{ text: string; confidence: number; bbox: BoundingBox }>;
+  logoPresence?: LogoPresenceResult;
+  logoDetection?: LogoInspectionDetails;
   findings: EngineFinding[];
   disclosures: string[];
 }
@@ -512,7 +526,7 @@ export async function runVisionAnalysis({
   facts,
   assets,
   ocrReferenceText,
-  timeoutMs = 15000,
+  timeoutMs = 60000,
 }: VisionAnalysisParams): Promise<VisionAnalysisResult> {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   const activeGuidelines = guidelines.filter((g) => g.is_active);
@@ -524,6 +538,10 @@ export async function runVisionAnalysis({
     const refText = cleanAndNormalizeOcrText(ocrReferenceText.trim());
     const refFindings: EngineFinding[] = [];
     refFindings.push(...auditImageTextAndTypography(refText));
+    const logoAudit = inspectLogoPresenceAndIdentity(null, activeAssets, refText, {
+      guidelines: activeGuidelines,
+    });
+    refFindings.push(...logoAudit.findings);
     refFindings.push(...auditImageBrandAndMarketingClaims(refText, activeGuidelines, activeFacts));
     refFindings.push(...auditImageAbusiveOrHarmfulLanguage(refText));
     refFindings.push(...auditImageCopyrightAndIpRisks(refText, activeAssets));
@@ -544,6 +562,8 @@ export async function runVisionAnalysis({
       unreadableSegmentsCount: 0,
       imageSummary: null,
       boundingBoxes: [],
+      logoPresence: logoAudit.presence,
+      logoDetection: logoAudit.details,
       findings: refFindings,
       disclosures,
     };
@@ -587,10 +607,11 @@ export async function runVisionAnalysis({
   if (apiKey) {
     const base64Data = loaded.buffer.toString('base64');
     const prompt = `You are BrandGuard AI's lead creative governance vision inspector.
-Analyze this uploaded marketing creative image independently for visible defects, typography quality, brand policy violations, and compliance issues.
+Analyze this uploaded marketing creative image independently for visible defects, typography quality, spelling errors, brand logo presence, policy violations, and compliance issues.
+Evaluate the image thoroughly EVEN IF NO CUSTOM BRAND RULES ARE CONFIGURED.
 
 === ACTIVE BRAND GUIDELINES ===
-${activeGuidelines.length > 0 ? activeGuidelines.map((g) => `ID: ${g.id} | Type: ${g.rule_type} | Severity: ${g.severity} | Title: ${g.title} | Rule: ${g.description} | Keywords: ${JSON.stringify(g.rule_configuration.keywords || [])}`).join('\n') : '(No custom brand guidelines configured - evaluate against general creative quality and advertising standards)'}
+${activeGuidelines.length > 0 ? activeGuidelines.map((g) => `ID: ${g.id} | Type: ${g.rule_type} | Severity: ${g.severity} | Title: ${g.title} | Rule: ${g.description} | Keywords: ${JSON.stringify(g.rule_configuration.keywords || [])}`).join('\n') : '(No custom brand guidelines configured - evaluate against universal creative quality, advertising standards, typography correctness, and brand identity best practices)'}
 
 === VERIFIED CORPORATE FACTS ===
 ${activeFacts.length > 0 ? activeFacts.map((f) => `ID: ${f.id} | Statement: ${f.fact_text} | Source: ${f.source_name}`).join('\n') : '(No corporate facts configured)'}
@@ -598,26 +619,46 @@ ${activeFacts.length > 0 ? activeFacts.map((f) => `ID: ${f.id} | Statement: ${f.
 === AUTHORIZED BRAND ASSETS (Logos, Colors, Badges) ===
 ${activeAssets.length > 0 ? activeAssets.map((a) => `ID: ${a.id} | Name: ${a.asset_name} | Type: ${a.asset_type} | Metadata: ${JSON.stringify(a.asset_metadata || {})}`).join('\n') : '(No authorized reference logo configured)'}
 
-=== AUDIT INSTRUCTIONS ===
-1. Transcribe all text visibly rendered in the creative image into "extracted_ocr_text" accurately.
-2. Inspect the creative image across these 7 categories:
-   - "spelling_and_text": Likely spelling mistakes, typos, duplicated words/figures, malformed words, broken words, or cut-off text.
-   - "logo_and_brand_identity": Logo distortion, stretching, improper cropping, blur, poor contrast, or deviation from configured authorized logo reference. If no official logo is configured, state that official-brand consistency could not be verified.
-   - "abusive_or_harmful_language": Profanity, insults, slurs, harassment, threats, or inappropriate copy in visible text.
-   - "layout_and_design_quality": Text clipping, cut-off elements, overlapping content, broken alignment, inconsistent spacing, unreadable font sizes, low contrast, blur, compression artifacts, or obscured disclaimers.
-   - "claims_and_consistency": Contradictory statements within the image (conflicting prices, conflicting discounts, conflicting durations or specs), suspicious absolute guarantees ("100% cure", "zero risk"), or contradictions with active brand guidelines and verified corporate facts.
-   - "copyright_and_ip_risk": Commercial stock watermarks (Getty, Shutterstock, etc.) or recognizable third-party logos/characters. Explain visible evidence and recommend human review. Do not claim legal infringement from pixels alone.
-   - "other_visible_issues": Other meaningful issues affecting professionalism, trust, or accessibility. Avoid generic nitpicking.
+=== MANDATORY AUDIT INSTRUCTIONS ===
+1. Transcribe all text visibly rendered in the creative image into "extracted_ocr_text" accurately (headlines, subheadings, badges, buttons, stickers, body text, packaging labels, and fine print).
+
+2. Rigorously inspect the creative image across these categories:
+   - "spelling_and_grammar": Inspect EVERY single word rendered in the image. Detect ANY spelling mistake, typo, letter transposition (e.g. "soelling" instead of "spelling", "dtect" instead of "detect", "gaurentee" instead of "guarantee", "recieve" instead of "receive", "limted" instead of "limited", "offfer" instead of "offer", "disconut" instead of "discount"), missing letter, duplicated words ("free free", "50% 50%"), broken/cut-off words, or grammar error. Set category to "spelling_and_grammar" with high or medium severity, the exact evidence_text, proposed_replacement, and bounding_box.
+   - "logo_and_brand_identity":
+     * Inspect the image canvas thoroughly for ANY brand logo, symbol, monogram, icon, badge, crest, seal, or brand wordmark anywhere on the canvas (e.g. monogram letters like "GP", emblem graphics, badges, or brand names in corners, headers, or overlays).
+     * Output a dedicated "logo_inspection" object:
+       - "presence": EXACTLY one of:
+         * "PRESENT": A recognizable logo, monogram, emblem, or brand mark is clearly visible on canvas.
+         * "PRESENT_UNVERIFIED": A likely brand mark, monogram, emblem, or wordmark is visible, but cannot be verified against an authorized reference asset.
+         * "MISSING": Full canvas inspection confirmed that NO logo, monogram, emblem, or brand mark is visible.
+         * "UNCERTAIN": Image quality, occlusion, severe crop, blur, or ambiguity prevents a reliable conclusion.
+       - "detected_mark": Detailed description of what mark/emblem was seen (e.g. "Purple 'GP' monogram emblem with 'Digital Work' wordmark in top-left") or "None".
+       - "location": Canvas location (e.g. "top-left", "top-right", "bottom-left", "bottom-right", "center", "none").
+       - "bounding_box": Bounding box coordinates { "ymin", "xmin", "ymax", "xmax" } normalized 0 to 1000 if visible, or null.
+       - "confidence": Float between 0.0 and 1.0 calibrated to visual evidence clarity.
+       - "matches_reference": Boolean if compared against AUTHORIZED BRAND ASSETS, or null if no reference configured.
+       - "reference_notes": Brief explanation of reference comparison or verification status.
+     * CRITICAL FINDING RULES FOR LOGOS:
+       - DO NOT report "Missing Brand Logo" if ANY logo, monogram, symbol, emblem, or wordmark is visible (presence is "PRESENT" or "PRESENT_UNVERIFIED").
+       - ONLY report "Missing Brand Logo" if presence is "MISSING" AND the ACTIVE BRAND GUIDELINES explicitly mandate a logo. If no active brand guideline requires a logo, do NOT report a missing logo violation.
+       - If an authorized reference logo is configured in AUTHORIZED BRAND ASSETS and the visible logo clearly conflicts with it, report "Brand Logo Reference Mismatch", NOT "Missing Brand Logo".
+       - If no authorized reference logo is configured, do not invent a mismatch.
+   - "layout_and_design_quality": Detect visible design flaws: text or elements clipped/cut off at canvas borders, low resolution/blur/pixelation, low contrast between text and background making typography illegible, cluttered/overlapping layout, illegible micro-typography disclaimers, or AI generation artifacts (distorted hands/anatomy, warped geometry, smudged text).
+   - "claims_and_consistency": Detect contradictory statements within the image (conflicting discounts like 50% vs 70%, conflicting prices, conflicting durations or specs), suspicious absolute guarantees ("100% cure", "zero risk", "guaranteed profit"), or contradictions with active guidelines and corporate facts.
+   - "abusive_or_harmful_language": Detect profanity, insults, slurs, harassment, threats, or inappropriate copy in visible text.
+   - "copyright_and_ip_risk": Detect commercial stock watermarks (Getty Images, Shutterstock, iStock, Alamy, Adobe Stock, "Sample", "Preview") or recognizable third-party logos/trademarks.
+   - "other_visible_issues": Any other visible flaw affecting quality, trustworthiness, or compliance.
 
 3. For every genuine violation detected, return:
-   - "category": "spelling_and_text" | "logo_and_brand_identity" | "abusive_or_harmful_language" | "layout_and_design_quality" | "claims_and_consistency" | "copyright_and_ip_risk" | "other_visible_issues"
+   - "category": "spelling_and_grammar" | "logo_and_brand_identity" | "abusive_or_harmful_language" | "layout_and_design_quality" | "claims_and_consistency" | "copyright_and_ip_risk" | "other_visible_issues"
    - "severity": "low" | "medium" | "high" | "critical"
-   - "finding_title": short clear title
-   - "explanation": evidence-backed explanation citing the specific visual defect, rule, or claim
-   - "evidence_text": the exact text from the image or description of the visual element
-   - "target_type": "text" | "logo" | "color" | "layout" | "visual_element"
-   - "bounding_box": object with "ymin", "xmin", "ymax", "xmax" normalized from 0 to 1000 representing the region of the violation on the image. ONLY provide bounding boxes where detection is genuinely localized.
+   - "finding_title": short clear descriptive title
+   - "explanation": evidence-backed explanation citing the specific visual defect or mistake
+   - "evidence_text": the exact misspelled word, missing element description, or graphic element
+   - "proposed_replacement": the corrected spelling or replacement text (if applicable)
    - "suggested_fix": actionable concrete fix
+   - "target_type": "text" | "logo" | "color" | "layout" | "visual_element"
+   - "bounding_box": object with "ymin", "xmin", "ymax", "xmax" normalized from 0 to 1000 representing the region of the violation on the image. (If localized)
    - "confidence": number between 0.0 and 1.0 based on certainty
    - "needs_human_verification": boolean
    - "human_verification_reason": string or null
@@ -628,20 +669,35 @@ ${activeAssets.length > 0 ? activeAssets.map((a) => `ID: ${a.id} | Name: ${a.ass
 Return ONLY a valid JSON object formatted exactly as:
 {
   "extracted_ocr_text": "All transcribed text here",
+  "logo_inspection": {
+    "presence": "PRESENT" | "PRESENT_UNVERIFIED" | "MISSING" | "UNCERTAIN",
+    "detected_mark": "Detailed description of visible mark or 'None'",
+    "location": "top-left" | "top-right" | "bottom-left" | "bottom-right" | "center" | "none",
+    "bounding_box": { "ymin": 0, "xmin": 0, "ymax": 100, "xmax": 100 } | null,
+    "confidence": 0.95,
+    "matches_reference": true | false | null,
+    "reference_notes": "Note on identity or reference comparison"
+  },
   "findings": [ ...array of finding objects... ]
 }
-If there are no violations, return { "extracted_ocr_text": "...", "findings": [] }.`;
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+If there are no violations, return { "extracted_ocr_text": "...", "logo_inspection": { "presence": "PRESENT", "detected_mark": "...", "location": "...", "confidence": 0.95, "matches_reference": null }, "findings": [] }.`;
 
     try {
-      const candidateModels = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+      const candidateModels = [
+        'gemini-3.5-flash',
+        'gemini-3-flash-preview',
+        'gemini-3.8-flash',
+        'gemini-flash-latest',
+        'gemini-2.5-flash',
+      ];
       let res: Response | null = null;
       let usedModel = candidateModels[0];
 
       for (const m of candidateModels) {
+        const perModelController = new AbortController();
+        const perModelTimeout = setTimeout(() => perModelController.abort(), Math.min(45000, timeoutMs));
         try {
+          console.log(`[Gemini Vision] Attempting model "${m}"...`);
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${apiKey}`;
           res = await fetch(url, {
             method: 'POST',
@@ -666,25 +722,33 @@ If there are no violations, return { "extracted_ocr_text": "...", "findings": []
                 responseMimeType: 'application/json',
               },
             }),
-            signal: controller.signal,
+            signal: perModelController.signal,
           });
+          clearTimeout(perModelTimeout);
           if (res.ok) {
             usedModel = m;
+            console.log(`[Gemini Vision] Model "${m}" responded successfully (status 200).`);
             break;
+          } else {
+            const errBody = await res.text().catch(() => '');
+            console.warn(`[Gemini Vision] Model "${m}" returned ${res.status} ${res.statusText}: ${errBody.slice(0, 150)}`);
           }
-        } catch {
-          // Try next candidate
+        } catch (fetchErr: unknown) {
+          clearTimeout(perModelTimeout);
+          console.warn(`[Gemini Vision] Model "${m}" call failed:`, fetchErr instanceof Error ? fetchErr.message : fetchErr);
         }
       }
-
-      clearTimeout(timeoutId);
 
       if (res && res.ok) {
         const data = await res.json();
         const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
         if (rawText) {
-          let parsed: { extracted_ocr_text?: string; findings?: Record<string, unknown>[] } = {};
+          let parsed: {
+            extracted_ocr_text?: string;
+            logo_inspection?: Record<string, unknown>;
+            findings?: Record<string, unknown>[];
+          } = {};
           try {
             parsed = JSON.parse(rawText);
           } catch {
@@ -697,44 +761,96 @@ If there are no violations, return { "extracted_ocr_text": "...", "findings": []
           const extractedOcr = cleanAndNormalizeOcrText(parsed.extracted_ocr_text || '');
           const rawFindings = Array.isArray(parsed.findings) ? parsed.findings : [];
 
-          const mappedFindings: EngineFinding[] = rawFindings.map((f: Record<string, unknown>) => {
+          let mappedFindings: EngineFinding[] = rawFindings.map((f: Record<string, unknown>) => {
             const sevStr = typeof f.severity === 'string' ? f.severity : '';
             const severity: RuleSeverity = ['low', 'medium', 'high', 'critical'].includes(sevStr)
               ? (sevStr as RuleSeverity)
               : 'medium';
 
             let bbox = null;
-            const rawBbox = f.bounding_box as { ymin?: unknown; xmin?: unknown; ymax?: unknown; xmax?: unknown } | undefined;
-            if (
-              rawBbox &&
-              typeof rawBbox.ymin === 'number' &&
-              typeof rawBbox.xmin === 'number' &&
-              typeof rawBbox.ymax === 'number' &&
-              typeof rawBbox.xmax === 'number'
-            ) {
+            const rawBbox = (f.bounding_box || f.box_2d || f.box || f.boundingBox) as Record<string, unknown> | number[] | undefined;
+            if (Array.isArray(rawBbox) && rawBbox.length === 4) {
               bbox = {
-                ymin: Math.max(0, Math.min(1000, rawBbox.ymin)),
-                xmin: Math.max(0, Math.min(1000, rawBbox.xmin)),
-                ymax: Math.max(0, Math.min(1000, rawBbox.ymax)),
-                xmax: Math.max(0, Math.min(1000, rawBbox.xmax)),
+                ymin: Math.max(0, Math.min(1000, Math.round(Number(rawBbox[0]) || 0))),
+                xmin: Math.max(0, Math.min(1000, Math.round(Number(rawBbox[1]) || 0))),
+                ymax: Math.max(0, Math.min(1000, Math.round(Number(rawBbox[2]) || 0))),
+                xmax: Math.max(0, Math.min(1000, Math.round(Number(rawBbox[3]) || 0))),
               };
+            } else if (rawBbox && typeof rawBbox === 'object' && !Array.isArray(rawBbox)) {
+              const objBbox = rawBbox as Record<string, unknown>;
+              const ymin = Number(objBbox.ymin ?? objBbox.y0 ?? objBbox.top);
+              const xmin = Number(objBbox.xmin ?? objBbox.x0 ?? objBbox.left);
+              const ymax = Number(objBbox.ymax ?? objBbox.y1 ?? objBbox.bottom);
+              const xmax = Number(objBbox.xmax ?? objBbox.x1 ?? objBbox.right);
+              if (!isNaN(ymin) && !isNaN(xmin) && !isNaN(ymax) && !isNaN(xmax)) {
+                bbox = {
+                  ymin: Math.max(0, Math.min(1000, Math.round(ymin))),
+                  xmin: Math.max(0, Math.min(1000, Math.round(xmin))),
+                  ymax: Math.max(0, Math.min(1000, Math.round(ymax))),
+                  xmax: Math.max(0, Math.min(1000, Math.round(xmax))),
+                };
+              }
             }
 
             const evText = typeof f.evidence_text === 'string' ? f.evidence_text : undefined;
-            const validCategories: FindingCategory[] = [
-              'spelling_and_text',
-              'logo_and_brand_identity',
-              'abusive_or_harmful_language',
-              'layout_and_design_quality',
-              'claims_and_consistency',
-              'copyright_and_ip_risk',
-              'other_visible_issues',
-              'brand_guideline',
-            ];
-            const rawCat = typeof f.category === 'string' ? f.category : 'brand_guideline';
-            const category: FindingCategory = validCategories.includes(rawCat)
-              ? rawCat
-              : 'other_visible_issues';
+            const findingTitle = typeof f.finding_title === 'string' ? f.finding_title : 'Visual Brand Policy Violation';
+            const rawCat = (typeof f.category === 'string' ? f.category : '').toLowerCase();
+            const lowTitle = findingTitle.toLowerCase();
+            let category: FindingCategory = 'other_visible_issues';
+            if (
+              rawCat.includes('spell') ||
+              rawCat.includes('typo') ||
+              rawCat.includes('grammar') ||
+              rawCat.includes('typography') ||
+              rawCat === 'spelling_and_text' ||
+              rawCat === 'spelling_and_grammar' ||
+              lowTitle.includes('spell') ||
+              lowTitle.includes('typo') ||
+              lowTitle.includes('word choice') ||
+              lowTitle.includes('misspelled')
+            ) {
+              category = 'spelling_and_grammar';
+            } else if (
+              rawCat.includes('logo') ||
+              rawCat.includes('brand_identity') ||
+              rawCat.includes('logo_integrity') ||
+              lowTitle.includes('logo')
+            ) {
+              category = 'logo_and_brand_identity';
+            } else if (
+              rawCat.includes('abusive') ||
+              rawCat.includes('harmful') ||
+              rawCat.includes('profan')
+            ) {
+              category = 'abusive_or_harmful_language';
+            } else if (
+              rawCat.includes('layout') ||
+              rawCat.includes('design') ||
+              rawCat.includes('quality') ||
+              rawCat.includes('visual')
+            ) {
+              category = 'layout_and_design_quality';
+            } else if (
+              rawCat.includes('claim') ||
+              rawCat.includes('consist') ||
+              rawCat.includes('discount')
+            ) {
+              category = 'claims_and_consistency';
+            } else if (
+              rawCat.includes('copyright') ||
+              rawCat.includes('watermark') ||
+              rawCat.includes('ip')
+            ) {
+              category = 'copyright_and_ip_risk';
+            } else if (rawCat.includes('guideline')) {
+              category = 'brand_guideline';
+            } else {
+              category = 'other_visible_issues';
+            }
+
+            const proposedRepl = typeof f.proposed_replacement === 'string'
+              ? f.proposed_replacement
+              : (typeof f.suggested_replacement === 'string' ? f.suggested_replacement : null);
 
             return {
               category,
@@ -747,6 +863,7 @@ If there are no violations, return { "extracted_ocr_text": "...", "findings": []
               asset_id: typeof f.asset_id === 'string' ? f.asset_id : null,
               confidence: typeof f.confidence === 'number' ? Math.max(0, Math.min(1, f.confidence)) : 0.85,
               suggested_fix: typeof f.suggested_fix === 'string' ? f.suggested_fix : undefined,
+              proposed_replacement: proposedRepl,
               source: 'vision_model' as const,
               verification_status: 'confirmed_violation' as const,
               bounding_box: bbox,
@@ -760,6 +877,125 @@ If there are no violations, return { "extracted_ocr_text": "...", "findings": []
               human_verification_reason: typeof f.human_verification_reason === 'string' ? f.human_verification_reason : null,
             };
           });
+
+          // Parse structured logo inspection from Gemini response
+          let logoInspection: LogoInspectionDetails = {
+            presence: 'UNCERTAIN',
+            confidence: 0.5,
+            is_identity_verified: false,
+            explanation: 'Visual inspection completed',
+            evidence: 'Visual inspection completed',
+          };
+
+          if (parsed.logo_inspection && typeof parsed.logo_inspection === 'object') {
+            const rawPres = String(parsed.logo_inspection.presence || '').toUpperCase();
+            const validPresence: LogoPresenceResult =
+              rawPres === 'PRESENT' || rawPres === 'PRESENT_UNVERIFIED' || rawPres === 'MISSING' || rawPres === 'UNCERTAIN'
+                ? rawPres
+                : 'UNCERTAIN';
+
+            const rawBox = parsed.logo_inspection.bounding_box as Record<string, unknown> | undefined;
+            const bbox = rawBox && typeof rawBox === 'object'
+              ? {
+                  ymin: Math.max(0, Math.min(1000, Number(rawBox.ymin) || 0)),
+                  xmin: Math.max(0, Math.min(1000, Number(rawBox.xmin) || 0)),
+                  ymax: Math.max(0, Math.min(1000, Number(rawBox.ymax) || 1000)),
+                  xmax: Math.max(0, Math.min(1000, Number(rawBox.xmax) || 1000)),
+                }
+              : undefined;
+
+            const markDesc = typeof parsed.logo_inspection.detected_mark === 'string' && parsed.logo_inspection.detected_mark !== 'None' ? parsed.logo_inspection.detected_mark : undefined;
+            const locStr = typeof parsed.logo_inspection.location === 'string' && parsed.logo_inspection.location !== 'none' ? parsed.logo_inspection.location : undefined;
+
+            logoInspection = {
+              presence: validPresence,
+              detected_mark: markDesc,
+              location: locStr,
+              bounding_box: bbox,
+              confidence: typeof parsed.logo_inspection.confidence === 'number'
+                ? Math.max(0, Math.min(1, parsed.logo_inspection.confidence))
+                : 0.85,
+              is_identity_verified: validPresence === 'PRESENT',
+              explanation: markDesc
+                ? `Logo/brand mark detected: ${markDesc} (${locStr || 'canvas region'}).`
+                : (validPresence === 'MISSING' ? 'Canvas visual inspection confirmed absence of brand logo or watermark.' : 'Visual inspection completed'),
+              matches_reference: typeof parsed.logo_inspection.matches_reference === 'boolean'
+                ? parsed.logo_inspection.matches_reference
+                : undefined,
+              reference_notes: typeof parsed.logo_inspection.reference_notes === 'string'
+                ? parsed.logo_inspection.reference_notes
+                : undefined,
+              evidence: markDesc
+                ? `Detected mark: ${markDesc} (${locStr || 'canvas'})`
+                : (validPresence === 'MISSING' ? 'Canvas visual inspection confirmed absence of brand logo or watermark.' : 'Visual inspection completed'),
+            };
+          } else {
+            const localInspect = inspectLogoPresenceAndIdentity(imageSummary, activeAssets, extractedOcr, {
+              guidelines: activeGuidelines,
+            });
+            logoInspection = localInspect.details;
+          }
+
+          // Supplementary safety checks on extracted text & brand logo
+          const localTypoFindings = auditImageTextAndTypography(extractedOcr);
+          for (const ltf of localTypoFindings) {
+            const alreadyFlagged = mappedFindings.some(
+              (mf) =>
+                (mf.category === 'spelling_and_grammar' || mf.category === 'spelling_and_text') &&
+                ((mf.evidence_text && ltf.evidence_text && mf.evidence_text.toLowerCase() === ltf.evidence_text.toLowerCase()) ||
+                  mf.finding_title.toLowerCase().includes((ltf.evidence_text || '').toLowerCase()))
+            );
+            if (!alreadyFlagged) {
+              mappedFindings.push(ltf);
+            }
+          }
+
+          // Explicit Evidence-Based Logo Contradiction Resolution
+          const logoPolicy = evaluateLogoPolicyRequirements(activeGuidelines, activeAssets);
+
+          mappedFindings = mappedFindings.filter((f) => {
+            const isMissingLogoFinding =
+              (f.category === 'logo_and_brand_identity' || f.category === 'logo_and_brand') &&
+              (f.finding_title.toLowerCase().includes('missing') || f.finding_title.toLowerCase().includes('no brand logo'));
+
+            if (!isMissingLogoFinding) return true;
+
+            // 1. If logo is visible (PRESENT or PRESENT_UNVERIFIED), suppress false missing-logo finding
+            if (logoInspection.presence === 'PRESENT' || logoInspection.presence === 'PRESENT_UNVERIFIED') {
+              console.log(`[Logo Governance] Resolved contradiction: Suppressed false-positive missing-logo finding because logo presence is ${logoInspection.presence} ("${logoInspection.detected_mark || 'Visible Mark'}").`);
+              return false;
+            }
+
+            // 2. If active brand guidelines do NOT mandate a logo, absence is not a violation
+            if (!logoPolicy.isMandatory) {
+              console.log('[Logo Governance] Suppressed missing-logo finding: Active brand guidelines do not mandate a logo for this creative.');
+              return false;
+            }
+
+            // 3. If logo presence is UNCERTAIN, do not assign confirmed violation
+            if (logoInspection.presence === 'UNCERTAIN') {
+              f.verification_status = 'unverifiable';
+              f.needs_human_verification = true;
+              f.confidence = Math.min(f.confidence, 0.60);
+              f.finding_title = 'Logo Presence Inconclusive / Verification Required';
+            }
+
+            return true;
+          });
+
+          // If logo is genuinely MISSING and MANDATED by guidelines, ensure finding is recorded
+          if (logoInspection.presence === 'MISSING' && logoPolicy.isMandatory) {
+            const hasMissingLogo = mappedFindings.some(
+              (f) => (f.category === 'logo_and_brand_identity' || f.category === 'logo_and_brand') && f.finding_title.toLowerCase().includes('missing')
+            );
+            if (!hasMissingLogo) {
+              const auditRes = inspectLogoPresenceAndIdentity(imageSummary, activeAssets, extractedOcr, {
+                guidelines: activeGuidelines,
+                logoInspection,
+              });
+              mappedFindings.push(...auditRes.findings);
+            }
+          }
 
           if (imageSummary) {
             imageSummary.hasLegibleTypography = extractedOcr.length > 0;
@@ -775,13 +1011,14 @@ If there are no violations, return { "extracted_ocr_text": "...", "findings": []
             ocrWordsCount: extractedOcr.split(/\s+/).filter(Boolean).length,
             ocrLinesCount: extractedOcr.split('\n').filter(Boolean).length,
             imageSummary,
+            logoPresence: logoInspection.presence,
+            logoDetection: logoInspection,
             findings: mappedFindings,
             disclosures: [`Multimodal creative visual analysis executed via Google Gemini Vision (${usedModel}).`],
           };
         }
       }
     } catch (err: unknown) {
-      clearTimeout(timeoutId);
       console.warn('Gemini vision API error, falling back to local OCR:', err);
     }
   }
@@ -809,8 +1046,10 @@ If there are no violations, return { "extracted_ocr_text": "...", "findings": []
   localFindings.push(...typographyFindings);
 
   // 2. Logo & Brand Identity
-  const logoFindings = auditImageLogoAndBrandIdentity(imageSummary, activeAssets);
-  localFindings.push(...logoFindings);
+  const logoAudit = inspectLogoPresenceAndIdentity(imageSummary, activeAssets, ocrResult.text, {
+    guidelines: activeGuidelines,
+  });
+  localFindings.push(...logoAudit.findings);
 
   // 3. Abusive & Harmful Language
   const abusiveFindings = auditImageAbusiveOrHarmfulLanguage(ocrResult.text, ocrResult.boundingBoxes);
@@ -870,6 +1109,8 @@ If there are no violations, return { "extracted_ocr_text": "...", "findings": []
     unreadableSegmentsCount: ocrResult.unreadableCount,
     imageSummary,
     boundingBoxes: ocrResult.boundingBoxes,
+    logoPresence: logoAudit.presence,
+    logoDetection: logoAudit.details,
     findings: localFindings,
     disclosures,
   };

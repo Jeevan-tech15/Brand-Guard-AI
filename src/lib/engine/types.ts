@@ -1,4 +1,14 @@
-import { RuleSeverity, ReviewStatus, BoundingBox, ImageSummaryStats, FindingCategory } from '@/lib/types';
+import {
+  RuleSeverity,
+  ReviewStatus,
+  BoundingBox,
+  ImageSummaryStats,
+  FindingCategory,
+  LogoPresenceResult,
+  LogoInspectionDetails,
+} from '@/lib/types';
+
+export type { LogoPresenceResult, LogoInspectionDetails };
 
 export interface EngineFinding {
   category: FindingCategory;
@@ -62,6 +72,8 @@ export interface EngineMetadata {
   limitationsDisclosed?: string;
   disclosures?: string[];
   imageSummary?: ImageSummaryStats | null;
+  logoPresence?: LogoPresenceResult;
+  logoDetection?: LogoInspectionDetails;
   modality?: 'image_only';
   checksCompleted?: Record<string, boolean>;
   checksStatus?: {

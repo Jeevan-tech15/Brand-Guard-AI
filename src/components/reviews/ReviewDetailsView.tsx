@@ -18,6 +18,7 @@ import {
   Sparkles,
   Image as ImageIcon,
   CheckCircle2,
+  XCircle,
   Wand2,
   Columns,
   ChevronDown,
@@ -445,6 +446,7 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
   const logoAndBrandList = review.findings?.filter(
     (f) =>
       f.category === 'logo_and_brand' ||
+      f.category === 'logo_and_brand_identity' ||
       f.category === 'logo_integrity' ||
       f.category === 'brand_guideline' ||
       f.finding_title.toLowerCase().includes('logo') ||
@@ -514,6 +516,7 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
     if (findingsCategoryFilter === 'logo_and_brand') {
       return (
         f.category === 'logo_and_brand' ||
+        f.category === 'logo_and_brand_identity' ||
         f.category === 'logo_integrity' ||
         f.category === 'brand_guideline' ||
         f.finding_title.toLowerCase().includes('logo') ||
@@ -1022,6 +1025,49 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                       {review.evaluation_metadata?.aiRun ? 'Gemini 2.5' : 'Local Engine'}
                     </span>
                   </div>
+
+                  <div className="flex items-center gap-1.5 text-[10px] bg-white p-1.5 rounded border border-gray-200 sm:col-span-3">
+                    {review.evaluation_metadata?.logoPresence === 'PRESENT' ? (
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600 shrink-0" />
+                    ) : review.evaluation_metadata?.logoPresence === 'PRESENT_UNVERIFIED' ? (
+                      <CheckCircle2 className="w-3 h-3 text-indigo-600 shrink-0" />
+                    ) : review.evaluation_metadata?.logoPresence === 'UNCERTAIN' ? (
+                      <AlertTriangle className="w-3 h-3 text-amber-500 shrink-0" />
+                    ) : review.evaluation_metadata?.logoPresence === 'MISSING' ? (
+                      <XCircle className="w-3 h-3 text-rose-500 shrink-0" />
+                    ) : (
+                      <Info className="w-3 h-3 text-gray-400 shrink-0" />
+                    )}
+                    <span className="text-gray-600 truncate">Logo Presence:</span>
+                    <span
+                      className={`font-semibold ml-1.5 ${
+                        review.evaluation_metadata?.logoPresence === 'PRESENT'
+                          ? 'text-emerald-700'
+                          : review.evaluation_metadata?.logoPresence === 'PRESENT_UNVERIFIED'
+                          ? 'text-indigo-700'
+                          : review.evaluation_metadata?.logoPresence === 'UNCERTAIN'
+                          ? 'text-amber-700'
+                          : review.evaluation_metadata?.logoPresence === 'MISSING'
+                          ? 'text-rose-700'
+                          : 'text-gray-700'
+                      }`}
+                    >
+                      {review.evaluation_metadata?.logoPresence === 'PRESENT'
+                        ? 'Present (Verified)'
+                        : review.evaluation_metadata?.logoPresence === 'PRESENT_UNVERIFIED'
+                        ? 'Detected (Visual Mark Visible)'
+                        : review.evaluation_metadata?.logoPresence === 'UNCERTAIN'
+                        ? 'Inconclusive / Review Required'
+                        : review.evaluation_metadata?.logoPresence === 'MISSING'
+                        ? 'Not Detected'
+                        : 'Evaluated'}
+                    </span>
+                    {review.evaluation_metadata?.logoDetection?.detected_mark && (
+                      <span className="text-gray-500 ml-auto truncate max-w-[200px]" title={review.evaluation_metadata.logoDetection.detected_mark}>
+                        {review.evaluation_metadata.logoDetection.detected_mark}
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -1094,6 +1140,37 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                             <li key={i}>{d}</li>
                           ))}
                         </ul>
+                      </div>
+                    )}
+
+                    {/* Logo Governance Telemetry */}
+                    {review.evaluation_metadata?.logoDetection && (
+                      <div className="p-2.5 rounded bg-slate-50 border border-slate-200 text-[11px] space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-[10px] uppercase tracking-wide text-slate-700">
+                            Logo Governance Telemetry:
+                          </span>
+                          <span className="font-mono text-[10px] px-1.5 py-0.5 rounded bg-white border border-slate-200 text-slate-700">
+                            Status: {review.evaluation_metadata.logoPresence || 'N/A'} (
+                            {Math.round((review.evaluation_metadata.logoDetection.confidence || 0.85) * 100)}% Conf)
+                          </span>
+                        </div>
+                        {review.evaluation_metadata.logoDetection.detected_mark && (
+                          <div className="text-slate-700">
+                            <span className="font-medium text-slate-800">Detected Mark:</span>{' '}
+                            {review.evaluation_metadata.logoDetection.detected_mark}
+                            {review.evaluation_metadata.logoDetection.location && (
+                              <span className="text-slate-500 ml-1">
+                                [{review.evaluation_metadata.logoDetection.location}]
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {review.evaluation_metadata.logoDetection.evidence && (
+                          <div className="text-slate-500 text-[10px]">
+                            {review.evaluation_metadata.logoDetection.evidence}
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -1382,7 +1459,7 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                             <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-orange-50 text-orange-950 border border-orange-200">
                               1. Spelling & Text
                             </span>
-                          ) : f.category === 'logo_and_brand' ? (
+                          ) : f.category === 'logo_and_brand' || f.category === 'logo_and_brand_identity' ? (
                             <span className="text-xs font-semibold px-2 py-0.5 rounded-md bg-teal-50 text-teal-950 border border-teal-200">
                               2. Logo & Brand
                             </span>

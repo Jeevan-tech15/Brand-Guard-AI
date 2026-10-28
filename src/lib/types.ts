@@ -131,6 +131,24 @@ export interface BrandProfile {
   updated_at?: string;
 }
 
+export type LogoPresenceResult = 'PRESENT' | 'PRESENT_UNVERIFIED' | 'MISSING' | 'UNCERTAIN';
+
+export interface LogoInspectionDetails {
+  presence: LogoPresenceResult;
+  detected_mark?: string | null;
+  location?: string | null;
+  bounding_box?: BoundingBox | null;
+  confidence: number;
+  matched_brand_asset_id?: string | null;
+  matched_brand_name?: string | null;
+  is_identity_verified: boolean;
+  explanation: string;
+  evidence?: string | null;
+  evidence_type?: 'pixel_vision' | 'ocr_typography' | 'vector_shape' | 'reference_match';
+  matches_reference?: boolean | null;
+  reference_notes?: string | null;
+}
+
 export interface BoundingBox {
   ymin: number; // 0 to 1000 normalized percentage
   xmin: number;
@@ -161,6 +179,8 @@ export interface ReviewEvaluationMetadata {
   limitationsDisclosed?: string;
   disclosures?: string[];
   imageSummary?: ImageSummaryStats | null;
+  logoPresence?: LogoPresenceResult;
+  logoDetection?: LogoInspectionDetails;
   modality?: 'image_only';
   checksStatus?: {
     imageInspection?: 'passed' | 'failed' | 'unavailable';

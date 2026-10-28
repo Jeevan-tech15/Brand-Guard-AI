@@ -245,6 +245,8 @@ export async function runComplianceReview(
       limitationsDisclosed: visionDisclosures.length > 0 ? visionDisclosures.join('; ') : undefined,
       disclosures: visionDisclosures,
       imageSummary,
+      logoPresence: visionResult.logoPresence,
+      logoDetection: visionResult.logoDetection,
       modality: 'image_only',
       guidelinesEvaluatedCount: activeGuidelines.length,
       factsEvaluatedCount: activeFacts.length,
@@ -280,4 +282,34 @@ export async function runComplianceReview(
       isPartialAnalysis: scoreBreakdown.isPartialAnalysis,
     },
   };
+}
+
+/**
+ * Parameter-object wrapper for runComplianceReview
+ */
+export async function evaluateCompliance(params: {
+  imageUrl?: string;
+  content?: string;
+  contentType?: ContentType;
+  guidelines?: BrandGuideline[];
+  facts?: ApprovedFact[];
+  assets?: AuthorizedAsset[];
+  ocrReferenceText?: string;
+  captionText?: string;
+  skipAI?: boolean;
+}): Promise<ComplianceReviewResult> {
+  const img = params.imageUrl || params.content || '';
+  return runComplianceReview(
+    img,
+    params.contentType || 'ad_copy',
+    params.guidelines || [],
+    params.facts || [],
+    {
+      imageUrl: params.imageUrl,
+      assets: params.assets,
+      ocrReferenceText: params.ocrReferenceText,
+      captionText: params.captionText,
+      skipAI: params.skipAI,
+    }
+  );
 }

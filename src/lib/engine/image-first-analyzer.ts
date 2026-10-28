@@ -1,4 +1,12 @@
-import { BrandGuideline, ApprovedFact, AuthorizedAsset, BoundingBox, ImageSummaryStats } from '@/lib/types';
+import {
+  BrandGuideline,
+  ApprovedFact,
+  AuthorizedAsset,
+  BoundingBox,
+  ImageSummaryStats,
+  LogoPresenceResult,
+  LogoInspectionDetails,
+} from '@/lib/types';
 import { EngineFinding } from './types';
 import { extractDiscountClaims, extractDurationClaims, extractPriceClaims, extractSpecClaims } from './cross-modal';
 import { cleanAndNormalizeOcrText } from './vision-analyzer';
@@ -9,42 +17,227 @@ import { runFactChecks } from './fact-checker';
 // 1. SPELLING AND TEXT ACCURACY
 // -------------------------------------------------------------------
 const MARKETING_SPELLING_DICTIONARY: Record<string, string> = {
+  // Common typo examples from user requests and marketing creatives
+  soelling: 'spelling',
+  dtect: 'detect',
+  exuisting: 'existing',
   gaurentee: 'guarantee',
   gaurenteed: 'guaranteed',
   guarenteed: 'guaranteed',
   guarentee: 'guarantee',
+  garantee: 'guarantee',
   limted: 'limited',
   limeted: 'limited',
   disconut: 'discount',
   discout: 'discount',
+  dicount: 'discount',
+  doscount: 'discount',
   offfer: 'offer',
   offffers: 'offers',
+  offr: 'offer',
+  ofer: 'offer',
   warenty: 'warranty',
   waranty: 'warranty',
+  warrenty: 'warranty',
   recieve: 'receive',
   recieved: 'received',
+  recieving: 'receiving',
   seperate: 'separate',
   seperately: 'separately',
+  seperation: 'separation',
   definately: 'definitely',
+  definatly: 'definitely',
+  definitly: 'definitely',
   untill: 'until',
   tommorrow: 'tomorrow',
+  tomorow: 'tomorrow',
   recomended: 'recommended',
+  recommened: 'recommended',
+  recommed: 'recommend',
   truely: 'truly',
   commited: 'committed',
+  comitted: 'committed',
   proteen: 'protein',
   protean: 'protein',
+  protien: 'protein',
   priveledge: 'privilege',
+  priviledge: 'privilege',
   independant: 'independent',
   succesful: 'successful',
+  succesfully: 'successfully',
+  sucessful: 'successful',
   enviroment: 'environment',
+  enviorment: 'environment',
   millenium: 'millennium',
   calender: 'calendar',
+  calandar: 'calendar',
   complience: 'compliance',
   lauch: 'launch',
   lauching: 'launching',
+  launche: 'launch',
   sponser: 'sponsor',
+  sponsership: 'sponsorship',
   supercede: 'supersede',
   alot: 'a lot',
+  teh: 'the',
+  adn: 'and',
+  fro: 'for',
+  wiht: 'with',
+  waht: 'what',
+  availabel: 'available',
+  availible: 'available',
+  avaliable: 'available',
+  ocassion: 'occasion',
+  occassion: 'occasion',
+  acheive: 'achieve',
+  acheived: 'achieved',
+  beleive: 'believe',
+  beleived: 'believed',
+  delicous: 'delicious',
+  deliciouss: 'delicious',
+  organik: 'organic',
+  natrual: 'natural',
+  naturel: 'natural',
+  nutricious: 'nutritious',
+  nutritionus: 'nutritious',
+  refun: 'refund',
+  refound: 'refund',
+  delivary: 'delivery',
+  delivry: 'delivery',
+  dilevery: 'delivery',
+  shiping: 'shipping',
+  shippin: 'shipping',
+  specail: 'special',
+  speical: 'special',
+  perfict: 'perfect',
+  perfact: 'perfect',
+  amazng: 'amazing',
+  amzing: 'amazing',
+  amazin: 'amazing',
+  exclusiv: 'exclusive',
+  exlusive: 'exclusive',
+  collecton: 'collection',
+  colletion: 'collection',
+  incredable: 'incredible',
+  incredibile: 'incredible',
+  powerfull: 'powerful',
+  durabel: 'durable',
+  durible: 'durable',
+  unbeleivable: 'unbelievable',
+  unbeliveable: 'unbelievable',
+  satisfacion: 'satisfaction',
+  satisfacton: 'satisfaction',
+  ingrediants: 'ingredients',
+  ingredents: 'ingredients',
+  supliment: 'supplement',
+  suplements: 'supplements',
+  suppliment: 'supplement',
+  qualitiy: 'quality',
+  qualty: 'quality',
+  premuim: 'premium',
+  premeum: 'premium',
+  inteligence: 'intelligence',
+  inteligente: 'intelligent',
+  writting: 'writing',
+  foward: 'forward',
+  mispelled: 'misspelled',
+  mispelling: 'misspelling',
+  goverment: 'government',
+  buisness: 'business',
+  busines: 'business',
+  neccessary: 'necessary',
+  necesary: 'necessary',
+  peice: 'piece',
+  weired: 'weird',
+  cheep: 'cheap',
+  authentik: 'authentic',
+  authenic: 'authentic',
+  certafied: 'certified',
+  certfied: 'certified',
+  experiance: 'experience',
+  subcription: 'subscription',
+  subcribe: 'subscribe',
+  regester: 'register',
+  registartion: 'registration',
+  checkout: 'checkout',
+  chekout: 'checkout',
+  detais: 'details',
+  detailes: 'details',
+  addres: 'address',
+  adress: 'address',
+  custmer: 'customer',
+  custmor: 'customer',
+  servise: 'service',
+  colaboration: 'collaboration',
+  anouncment: 'announcement',
+  celebrate: 'celebrate',
+  celibrate: 'celebrate',
+  aniversary: 'anniversary',
+  absolutly: 'absolutely',
+  alredy: 'already',
+  begining: 'beginning',
+  carreer: 'career',
+  colleague: 'colleague',
+  collegue: 'colleague',
+  embarass: 'embarrass',
+  existance: 'existence',
+  familar: 'familiar',
+  finaly: 'finally',
+  foriegn: 'foreign',
+  grammer: 'grammar',
+  greatful: 'grateful',
+  happend: 'happened',
+  harrasment: 'harassment',
+  heigth: 'height',
+  imediately: 'immediately',
+  incidently: 'incidentally',
+  interupt: 'interrupt',
+  knowlege: 'knowledge',
+  maintainance: 'maintenance',
+  managment: 'management',
+  mischievious: 'mischievous',
+  noticable: 'noticeable',
+  occured: 'occurred',
+  oppurtunity: 'opportunity',
+  oportunity: 'opportunity',
+  prefered: 'preferred',
+  publically: 'publicly',
+  realy: 'really',
+  refered: 'referred',
+  remeber: 'remember',
+  resistence: 'resistance',
+  rythm: 'rhythm',
+  schedual: 'schedule',
+  skedule: 'schedule',
+  succede: 'succeed',
+  suprise: 'surprise',
+  tendancy: 'tendency',
+  threshhold: 'threshold',
+  twelth: 'twelfth',
+  tyrany: 'tyranny',
+  vaccum: 'vacuum',
+  vehical: 'vehicle',
+  visable: 'visible',
+  whithout: 'without',
+  yeild: 'yield',
+  planing: 'planning',
+  planin: 'planning',
+  movments: 'moments',
+  movemnts: 'moments',
+  vaction: 'vacation',
+  vacay: 'vacation',
+  advanture: 'adventure',
+  advenutre: 'adventure',
+  memmories: 'memories',
+  memorise: 'memories',
+  sumer: 'summer',
+  suumer: 'summer',
+  explor: 'explore',
+  destintion: 'destination',
+  destnation: 'destination',
+  journy: 'journey',
+  travle: 'travel',
+  traval: 'travel',
 };
 
 // Common brand names to never flag as misspellings
@@ -61,11 +254,57 @@ const DEFAULT_BRAND_WHITELIST = new Set([
   'cloudnova',
   'wanderluxe',
   'acme',
+  'aeropulse',
+  'novapay',
   'instagram',
   'linkedin',
   'soc2',
   'iso27001',
 ]);
+
+// Core reference vocabulary of standard commercial marketing words for typo distance detection
+const COMMON_MARKETING_WORDS = [
+  'guarantee', 'guaranteed', 'discount', 'warranty', 'limited', 'offer', 'special',
+  'receive', 'received', 'separate', 'definitely', 'tomorrow', 'protein', 'delicious',
+  'organic', 'natural', 'nutritious', 'delivery', 'shipping', 'quality', 'premium',
+  'collection', 'exclusive', 'incredible', 'powerful', 'durable', 'unbelievable',
+  'satisfaction', 'ingredients', 'supplement', 'business', 'experience', 'customer',
+  'service', 'anniversary', 'edition', 'package', 'features', 'technology', 'design',
+  'protect', 'performance', 'comfort', 'lightweight', 'wireless', 'battery', 'charge',
+  'security', 'enterprise', 'reliability', 'certified', 'official', 'innovative',
+  'solution', 'support', 'available', 'order', 'purchase', 'saving', 'savings',
+  'sound', 'clarity', 'active', 'cancellation', 'playtime', 'device', 'devices',
+  'terms', 'apply', 'results', 'vary', 'mega', 'sale', 'promo', 'stores',
+  'supplies', 'combined', 'dock', 'ecosystem', 'power', 'generation', 'creators',
+  'registered', 'trademark', 'preview', 'uptime', 'region', 'automated', 'automate', 'failover',
+  'infrastructure', 'nutrition', 'fitness', 'plant', 'wheat', 'gluten', 'recyclable',
+  'planning', 'moments', 'adventure', 'summer', 'travel', 'vacation', 'explore',
+  'destination', 'memories', 'capture', 'world', 'hidden', 'starts', 'start', 'scale', 'vibes', 'journey',
+  'pure', 'your', 'with', 'fuel', 'dock', 'mega', 'pack', 'live', 'time', 'free', 'save',
+  'market', 'marketing', 'platform', 'creative', 'visual', 'compliance', 'workflow', 'workflows',
+  'review', 'reviews', 'intelligence', 'trial', 'digital', 'work', 'cloud', 'system', 'systems'
+];
+
+function levenshteinDistance(s1: string, s2: string): number {
+  if (s1 === s2) return 0;
+  if (Math.abs(s1.length - s2.length) > 2) return 99;
+  const len1 = s1.length;
+  const len2 = s2.length;
+  const d: number[][] = [];
+  for (let i = 0; i <= len1; i++) d[i] = [i];
+  for (let j = 0; j <= len2; j++) d[0][j] = j;
+  for (let i = 1; i <= len1; i++) {
+    for (let j = 1; j <= len2; j++) {
+      const cost = s1[i - 1] === s2[j - 1] ? 0 : 1;
+      d[i][j] = Math.min(
+        d[i - 1][j] + 1,
+        d[i][j - 1] + 1,
+        d[i - 1][j - 1] + cost
+      );
+    }
+  }
+  return d[len1][len2];
+}
 
 export function auditImageTextAndTypography(
   imageText: string,
@@ -81,7 +320,9 @@ export function auditImageTextAndTypography(
     ...customBrandNames.map((b) => b.toLowerCase().trim()),
   ]);
 
-  // 1. Marketing spelling error detection
+  const flaggedWords = new Set<string>();
+
+  // 1. Marketing spelling error detection via extensive dictionary
   for (const [wrong, right] of Object.entries(MARKETING_SPELLING_DICTIONARY)) {
     const regex = new RegExp(`\\b${wrong}\\b`, 'gi');
     let match: RegExpExecArray | null;
@@ -89,14 +330,15 @@ export function auditImageTextAndTypography(
       const actualWord = match[0];
       const lowerWord = actualWord.toLowerCase();
 
-      if (brandWhitelist.has(lowerWord)) continue;
+      if (brandWhitelist.has(lowerWord) || flaggedWords.has(lowerWord)) continue;
+      flaggedWords.add(lowerWord);
 
       const matchingBbox = boundingBoxes?.find((b) =>
         b.text.toLowerCase().includes(lowerWord)
       )?.bbox;
 
       findings.push({
-        category: 'spelling_and_text',
+        category: 'spelling_and_grammar',
         severity: 'medium',
         finding_title: `Spelling Error in Creative Typography: "${actualWord}"`,
         explanation: `The word "${actualWord}" is misspelled in the visible marketing graphic. Typographical mistakes diminish brand trust, clarity, and professionalism.`,
@@ -117,7 +359,72 @@ export function auditImageTextAndTypography(
     }
   }
 
-  // 2. Duplicated words or figures (e.g. "50% 50%", "the the", "free free")
+  // 2. Algorithmic single-character edit distance typo detection (5+ characters)
+  const tokens = normalized.match(/\b[a-zA-Z]{5,18}\b/g) || [];
+  for (const token of tokens) {
+    const lowerToken = token.toLowerCase();
+    if (
+      brandWhitelist.has(lowerToken) ||
+      flaggedWords.has(lowerToken) ||
+      COMMON_MARKETING_WORDS.includes(lowerToken) ||
+      MARKETING_SPELLING_DICTIONARY[lowerToken]
+    ) {
+      continue;
+    }
+
+    // Skip all-uppercase acronyms of <=5 chars
+    if (token === token.toUpperCase() && token.length <= 5) continue;
+
+    for (const validWord of COMMON_MARKETING_WORDS) {
+      // Ignore valid regular inflections (plural -s/-es, past tense -ed/-d, participle -ing, adverb -ly)
+      const isRegularInflection =
+        (lowerToken.endsWith('s') && lowerToken.slice(0, -1) === validWord) ||
+        (lowerToken.endsWith('es') && lowerToken.slice(0, -2) === validWord) ||
+        (lowerToken.endsWith('ed') && lowerToken.slice(0, -2) === validWord) ||
+        (lowerToken.endsWith('d') && lowerToken.slice(0, -1) === validWord) ||
+        (lowerToken.endsWith('ing') && lowerToken.slice(0, -3) === validWord) ||
+        (lowerToken.endsWith('ly') && lowerToken.slice(0, -2) === validWord);
+      if (isRegularInflection) continue;
+
+      const isReverseInflection =
+        (validWord.endsWith('s') && validWord.slice(0, -1) === lowerToken) ||
+        (validWord.endsWith('es') && validWord.slice(0, -2) === lowerToken) ||
+        (validWord.endsWith('ed') && validWord.slice(0, -2) === lowerToken) ||
+        (validWord.endsWith('d') && validWord.slice(0, -1) === lowerToken) ||
+        (validWord.endsWith('ing') && validWord.slice(0, -3) === lowerToken) ||
+        (validWord.endsWith('ly') && validWord.slice(0, -2) === lowerToken);
+      if (isReverseInflection) continue;
+
+      if (Math.abs(validWord.length - lowerToken.length) <= 1 && levenshteinDistance(lowerToken, validWord) === 1) {
+        flaggedWords.add(lowerToken);
+        const matchingBbox = boundingBoxes?.find((b) =>
+          b.text.toLowerCase().includes(lowerToken)
+        )?.bbox;
+
+        findings.push({
+          category: 'spelling_and_grammar',
+          severity: 'medium',
+          finding_title: `Likely Typo in Creative Typography: "${token}"`,
+          explanation: `The term "${token}" appears to be a typo or misspelled variation of standard word "${validWord}". Unintended typos diminish ad effectiveness and brand authority.`,
+          evidence_text: token,
+          confidence: 0.9,
+          suggested_fix: `Correct the spelling of "${token}" to "${validWord}".`,
+          source: 'ocr_analysis',
+          verification_status: 'confirmed_violation',
+          target_type: 'text',
+          target_scope: 'image',
+          image_evidence: token,
+          bounding_box: matchingBbox || null,
+          proposed_replacement: validWord,
+          resolution_status: 'unresolved',
+          needs_human_verification: false,
+        });
+        break;
+      }
+    }
+  }
+
+  // 3. Duplicated words or figures (e.g. "50% 50%", "the the", "free free")
   const duplicateWordRegex = /\b([a-zA-Z]{3,}|[1-9]\d%)\s+\1\b/gi;
   let dupMatch: RegExpExecArray | null;
   while ((dupMatch = duplicateWordRegex.exec(normalized)) !== null) {
@@ -131,7 +438,7 @@ export function auditImageTextAndTypography(
     )?.bbox;
 
     findings.push({
-      category: 'spelling_and_text',
+      category: 'spelling_and_grammar',
       severity: 'medium',
       finding_title: `Duplicated Word/Figure in Creative Typography: "${snippet}"`,
       explanation: `Repetitive token "${snippet}" detected in visible marketing typography. Accidental repeated words or figures indicate copy-paste oversights in the design layout.`,
@@ -150,12 +457,12 @@ export function auditImageTextAndTypography(
     });
   }
 
-  // 3. Cut-off or dangling hyphenated words across line boundaries
+  // 4. Cut-off or dangling hyphenated words across line boundaries
   const lines = normalized.split('\n').map((l) => l.trim()).filter(Boolean);
   for (const line of lines) {
     if (line.match(/[a-zA-Z]{2,}-\s*$/) && !line.match(/\b(pre-|post-|non-|all-)\s*$/i)) {
       findings.push({
-        category: 'spelling_and_text',
+        category: 'spelling_and_grammar',
         severity: 'low',
         finding_title: `Hyphenated/Cut-Off Word at Line Boundary: "${line}"`,
         explanation: `Line ends with an unjoined hyphenated fragment. Typography should avoid breaking single marketing terms across line boundaries without wrapping.`,
@@ -180,36 +487,265 @@ export function auditImageTextAndTypography(
 // -------------------------------------------------------------------
 // 2. LOGO AND BRAND IDENTITY
 // -------------------------------------------------------------------
-export function auditImageLogoAndBrandIdentity(
-  imageSummary: ImageSummaryStats | null,
-  authorizedAssets: AuthorizedAsset[]
-): EngineFinding[] {
-  const findings: EngineFinding[] = [];
+// -------------------------------------------------------------------
+// 2. LOGO AND BRAND IDENTITY GOVERNANCE
+// -------------------------------------------------------------------
+
+export interface LogoAuditOptions {
+  hasDetectedLogo?: boolean;
+  brandName?: string;
+  guidelines?: BrandGuideline[];
+  contentType?: string;
+  logoInspection?: Partial<LogoInspectionDetails>;
+}
+
+/**
+ * Evaluates whether active brand guidelines explicitly mandate a logo for this creative.
+ * If no guideline mandates a logo, the system will not invent a requirement or flag missing logos.
+ */
+export function evaluateLogoPolicyRequirements(
+  guidelines: BrandGuideline[] = [],
+  authorizedAssets: AuthorizedAsset[] = [],
+  contentType?: string
+): {
+  isMandatory: boolean;
+  reason?: string;
+  guideline?: BrandGuideline;
+  primaryLogo?: AuthorizedAsset;
+} {
   const primaryLogo = authorizedAssets.find(
     (a) => a.is_active && a.asset_type === 'logo' && (a.asset_metadata?.is_primary || true)
   );
 
-  // If no reference logo is configured in Brand Guidelines
-  if (!primaryLogo) {
-    findings.push({
-      category: 'logo_and_brand_identity',
-      severity: 'low',
-      finding_title: 'Official Brand Logo Reference Not Configured',
-      explanation: 'No approved official logo reference has been uploaded in Brand Guidelines. Visual logo fidelity, proportions, color variants, and clear space could not be verified against an official vector asset.',
-      evidence_text: 'Missing official logo reference in Brand Guidelines',
-      confidence: 1.0,
-      suggested_fix: 'Upload your official brand logo in Brand Guidelines under Visual Assets to enable automated logo governance audits.',
-      source: 'rule',
-      verification_status: 'unverifiable',
-      target_type: 'logo',
-      target_scope: 'image',
-      resolution_status: 'unresolved',
-      needs_human_verification: true,
-      human_verification_reason: 'Configure an official logo reference asset in Brand Guidelines.',
-    });
+  const logoGuideline = guidelines.find((g) => {
+    if (!g.is_active) return false;
+    const ruleType = (g.rule_type || '').toLowerCase();
+    const title = (g.title || '').toLowerCase();
+    const desc = (g.description || '').toLowerCase();
+
+    if (
+      ruleType === 'logo_presence' ||
+      ruleType === 'logo_usage' ||
+      ruleType === 'mandatory_logo'
+    ) {
+      return true;
+    }
+    if (
+      title.includes('require logo') ||
+      title.includes('logo presence') ||
+      title.includes('mandatory logo') ||
+      title.includes('missing logo')
+    ) {
+      return true;
+    }
+    if (
+      (desc.includes('must include') || desc.includes('always include') || desc.includes('required on all')) &&
+      (desc.includes('logo') || desc.includes('brand mark') || desc.includes('watermark'))
+    ) {
+      return true;
+    }
+    if (g.rule_configuration?.require_logo === true) {
+      return true;
+    }
+    return false;
+  });
+
+  return {
+    isMandatory: Boolean(logoGuideline),
+    reason: logoGuideline?.description || undefined,
+    guideline: logoGuideline,
+    primaryLogo,
+  };
+}
+
+/**
+ * Rigorously separates logo presence from logo identity and reference matching:
+ * - PRESENT: recognizable logo, monogram, or brand mark is visible.
+ * - PRESENT_UNVERIFIED: a likely logo or mark is visible, but cannot be confirmed against an official reference asset.
+ * - MISSING: no recognizable logo or mark is visible, with sufficient visual evidence.
+ * - UNCERTAIN: image quality, occlusion, size, or ambiguity prevents a reliable conclusion.
+ */
+export function inspectLogoPresenceAndIdentity(
+  imageSummary: ImageSummaryStats | null,
+  authorizedAssets: AuthorizedAsset[] = [],
+  ocrText?: string,
+  options?: LogoAuditOptions
+): {
+  presence: LogoPresenceResult;
+  details: LogoInspectionDetails;
+  findings: EngineFinding[];
+} {
+  const findings: EngineFinding[] = [];
+  const policy = evaluateLogoPolicyRequirements(options?.guidelines, authorizedAssets, options?.contentType);
+  const primaryLogo = policy.primaryLogo;
+
+  const cleanText = ocrText ? cleanAndNormalizeOcrText(ocrText).toLowerCase() : '';
+
+  // Extract known brand names from authorized assets, whitelist, or options
+  const activeLogoAssets = authorizedAssets.filter((a) => a.is_active && a.asset_type === 'logo');
+  const knownBrandNames = [
+    ...Array.from(DEFAULT_BRAND_WHITELIST),
+    ...(options?.brandName ? [options.brandName.toLowerCase()] : []),
+    ...activeLogoAssets
+      .map((a) => a.asset_name.toLowerCase().replace(/official\s*logo/i, '').replace(/logo/i, '').trim())
+      .filter((n) => n.length >= 2),
+  ];
+
+  const hasBrandNameMention = knownBrandNames.some((name) => cleanText.includes(name));
+
+  // Extract brand signifier words and prominent header wordmark candidates
+  const brandSignifiers = [
+    'digital work', 'digital', 'brand', 'studio', 'studios', 'platform', 'technologies',
+    'labs', 'agency', 'media', 'solutions', 'enterprises', 'app', 'corp',
+    'inc', 'co', 'group', 'company', 'network', 'creative', 'ventures',
+  ];
+  const ocrLines = (ocrText || '').split('\n').map((l) => l.trim()).filter((l) => l.length >= 2);
+  const headerCandidate = ocrLines.length > 0 ? ocrLines[0] : '';
+  const isHeaderLikelyBrand =
+    headerCandidate.length >= 2 &&
+    headerCandidate.length <= 35 &&
+    !/^(flash|sale|discount|off|shop|buy|click|limited|warning|caution|terms|apply|free)/i.test(headerCandidate) &&
+    (brandSignifiers.some((sig) => headerCandidate.toLowerCase().includes(sig)) || /^[A-Z]/.test(headerCandidate));
+
+  const hasLikelyBrandWordmark = hasBrandNameMention || isHeaderLikelyBrand;
+
+  // Determine presence
+  let presence: LogoPresenceResult = 'UNCERTAIN';
+  let detectedMark = options?.logoInspection?.detected_mark;
+  let location = options?.logoInspection?.location;
+  let confidence = options?.logoInspection?.confidence ?? 0.85;
+  let matchesReference = options?.logoInspection?.matches_reference;
+  let referenceNotes = options?.logoInspection?.reference_notes;
+
+  if (options?.logoInspection?.presence) {
+    presence = options.logoInspection.presence;
+  } else if (options?.hasDetectedLogo === true) {
+    // Logo mark visibly identified (e.g. from vision model or icon detector)
+    if (primaryLogo && hasBrandNameMention) {
+      presence = 'PRESENT';
+      detectedMark = detectedMark || primaryLogo.asset_name;
+    } else {
+      // Mark is visible, but authentic corporate identity is unverified against a reference
+      presence = 'PRESENT_UNVERIFIED';
+      detectedMark = detectedMark || (isHeaderLikelyBrand ? headerCandidate : 'Visible brand mark / emblem');
+      location = location || (isHeaderLikelyBrand ? 'top-left / header' : 'canvas');
+    }
+  } else if (hasLikelyBrandWordmark) {
+    if (primaryLogo && hasBrandNameMention) {
+      presence = 'PRESENT';
+      detectedMark = detectedMark || primaryLogo.asset_name;
+    } else {
+      presence = 'PRESENT_UNVERIFIED';
+      detectedMark = detectedMark || (isHeaderLikelyBrand ? headerCandidate : (hasBrandNameMention ? 'Detected brand wordmark' : 'Detected brand mark / attribution'));
+      location = location || (isHeaderLikelyBrand ? 'top-left / header' : 'canvas');
+    }
+  } else if (options?.hasDetectedLogo === false) {
+    // Explicitly verified absence from visual inspection
+    if (imageSummary && (imageSummary.width || 0) >= 200 && (imageSummary.height || 0) >= 200) {
+      presence = 'MISSING';
+      confidence = 0.88;
+    } else {
+      presence = 'UNCERTAIN';
+      confidence = 0.60;
+    }
+  } else {
+    // In heuristic / local mode without explicit vision detector
+    // If OCR extracted text cleanly and full image inspected without any logo mark
+    if (cleanText.length > 20 && imageSummary && (imageSummary.width || 0) >= 300) {
+      presence = 'MISSING';
+      confidence = 0.82;
+    } else {
+      presence = 'UNCERTAIN';
+      confidence = 0.55;
+    }
   }
 
-  // Check aspect ratio compliance if configured
+  // Build details
+  const details: LogoInspectionDetails = {
+    presence,
+    detected_mark: detectedMark,
+    location,
+    bounding_box: options?.logoInspection?.bounding_box,
+    confidence,
+    is_identity_verified: presence === 'PRESENT',
+    explanation: detectedMark
+      ? `Logo/brand mark detected: ${detectedMark} (${location || 'canvas region'}).`
+      : (presence === 'MISSING' ? 'Canvas visual inspection confirmed absence of brand logo or watermark.' : 'Logo presence evaluation completed.'),
+    matches_reference: matchesReference,
+    reference_notes: referenceNotes,
+    evidence: detectedMark
+      ? `Detected brand mark: "${detectedMark}" (${location || 'canvas region'})`
+      : (presence === 'MISSING' ? 'Visual inspection of canvas confirmed absence of brand logo or watermark.' : 'Logo presence evaluation completed.'),
+  };
+
+  // 1. If logo is MISSING:
+  // ONLY create a finding if active brand guidelines actually mandate a logo!
+  if (presence === 'MISSING') {
+    if (policy.isMandatory) {
+      findings.push({
+        category: 'logo_and_brand_identity',
+        severity: policy.guideline?.severity || 'medium',
+        finding_title: 'Missing Brand Logo on Marketing Creative / Product Post',
+        explanation: `${policy.guideline?.title || 'Brand Policy'}: ${policy.reason || 'Active brand guidelines require a visible brand logo on marketing creatives.'} Full visual inspection of the canvas confirmed that no recognizable brand logo, monogram, or watermark is present.`,
+        evidence_text: 'No brand logo or emblem detected on canvas',
+        confidence,
+        suggested_fix: 'Add your official brand logo in a prominent, uncluttered position (such as the top-left, top-right, or bottom corner) with adequate clear space and contrast.',
+        source: 'image',
+        verification_status: 'confirmed_violation',
+        target_type: 'logo',
+        target_scope: 'image',
+        image_evidence: 'Canvas inspected; brand logo absent',
+        guideline_id: policy.guideline?.id || null,
+        resolution_status: 'unresolved',
+        needs_human_verification: false,
+      });
+    }
+    // If policy.isMandatory is false, do NOT invent a missing logo finding!
+  } else if (presence === 'UNCERTAIN') {
+    // If ambiguous and policy mandates logo, report for human verification with calibrated confidence
+    if (policy.isMandatory) {
+      findings.push({
+        category: 'logo_and_brand_identity',
+        severity: 'low',
+        finding_title: 'Logo Presence Inconclusive / Verification Required',
+        explanation: `Active brand guidelines require a brand logo, but image clarity, resolution, or occlusion prevents conclusive verification of the logo mark. Manual confirmation is recommended.`,
+        evidence_text: 'Inconclusive logo mark visibility on canvas',
+        confidence: Math.min(confidence, 0.60),
+        suggested_fix: 'Ensure the brand logo is displayed with high resolution and sufficient contrast against the background.',
+        source: 'image',
+        verification_status: 'unverifiable',
+        target_type: 'logo',
+        target_scope: 'image',
+        guideline_id: policy.guideline?.id || null,
+        resolution_status: 'unresolved',
+        needs_human_verification: true,
+        human_verification_reason: 'Image resolution, occlusion, or background contrast prevents conclusive verification.',
+      });
+    }
+  } else if (presence === 'PRESENT' || presence === 'PRESENT_UNVERIFIED') {
+    // Logo is visible! Check if there is an actual reference mismatch
+    if (primaryLogo && matchesReference === false) {
+      findings.push({
+        category: 'logo_and_brand_identity',
+        severity: 'high',
+        finding_title: 'Brand Logo Reference Mismatch',
+        explanation: `Detected logo ("${detectedMark || 'Unapproved mark'}") conflicts with approved brand reference "${primaryLogo.asset_name}". ${referenceNotes || 'Using an unauthorized logo variant or third-party symbol compromises brand integrity.'}`,
+        evidence_text: detectedMark || 'Mismatched logo mark on canvas',
+        confidence: Math.max(0.80, confidence),
+        suggested_fix: `Replace the unapproved mark with the official "${primaryLogo.asset_name}" asset from Brand Guidelines.`,
+        source: 'image',
+        verification_status: 'confirmed_violation',
+        target_type: 'logo',
+        target_scope: 'image',
+        image_evidence: detectedMark,
+        asset_id: primaryLogo.id,
+        resolution_status: 'unresolved',
+        needs_human_verification: presence === 'PRESENT_UNVERIFIED',
+      });
+    }
+  }
+
+  // 2. Aspect ratio compliance if configured in authorizedAssets
   if (imageSummary && imageSummary.width && imageSummary.height) {
     const aspectRuleAsset = authorizedAssets.find(
       (a) => a.asset_type === 'logo' && a.asset_metadata?.allowed_aspect_ratios
@@ -239,7 +775,21 @@ export function auditImageLogoAndBrandIdentity(
     }
   }
 
-  return findings;
+  return {
+    presence,
+    details,
+    findings,
+  };
+}
+
+export function auditImageLogoAndBrandIdentity(
+  imageSummary: ImageSummaryStats | null,
+  authorizedAssets: AuthorizedAsset[] = [],
+  ocrText?: string,
+  options?: LogoAuditOptions
+): EngineFinding[] {
+  const result = inspectLogoPresenceAndIdentity(imageSummary, authorizedAssets, ocrText, options);
+  return result.findings;
 }
 
 // -------------------------------------------------------------------
