@@ -131,7 +131,27 @@ export interface BrandProfile {
   updated_at?: string;
 }
 
-export type LogoPresenceResult = 'PRESENT' | 'PRESENT_UNVERIFIED' | 'MISSING' | 'UNCERTAIN';
+export type LogoPresenceResult =
+  | 'LOGO_PRESENT'
+  | 'LOGO_PRESENT_IDENTITY_UNVERIFIED'
+  | 'LOGO_REFERENCE_MISMATCH'
+  | 'LOGO_MISSING'
+  | 'LOGO_UNCERTAIN'
+  | 'PRESENT'
+  | 'PRESENT_UNVERIFIED'
+  | 'MISSING'
+  | 'UNCERTAIN';
+
+export interface EvaluatedRuleSnapshot {
+  id: string;
+  title: string;
+  rule_type: string;
+  severity: RuleSeverity;
+  status: 'PASS' | 'FAIL' | 'UNVERIFIABLE';
+  evidence?: string | null;
+  finding_id?: string | null;
+  reason?: string | null;
+}
 
 export interface LogoInspectionDetails {
   presence: LogoPresenceResult;
@@ -197,6 +217,7 @@ export interface ReviewEvaluationMetadata {
   checksCompleted?: Record<string, boolean>;
   guidelinesEvaluatedCount?: number;
   factsEvaluatedCount?: number;
+  rulesEvaluated?: EvaluatedRuleSnapshot[];
   analysisNotes?: string;
   isPartialAnalysis?: boolean;
   analysisStatus?: 'clean' | 'partial' | 'failed' | 'complete';

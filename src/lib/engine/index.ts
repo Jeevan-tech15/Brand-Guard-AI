@@ -143,21 +143,41 @@ export async function runComplianceReview(
 
   // Run deterministic brand guideline rules and fact verification on extracted OCR / reference text
   const textForAudits = extractedOcrText || ocrText || '';
-  if (textForAudits.trim()) {
-    const { findings: detFindings } = runDeterministicChecks(textForAudits, contentType, activeGuidelines, { targetScope: 'image' });
-    const { findings: factFindings } = runFactChecks(textForAudits, activeFacts, { sourceTag: 'image' });
+  const { findings: detFindings, evaluatedRules: baseEvaluatedRules } = runDeterministicChecks(
+    textForAudits,
+    contentType,
+    activeGuidelines,
+    { targetScope: 'image' }
+  );
 
-    for (const df of detFindings) {
-      if (!imageFindings.some((f) => (df.guideline_id && f.guideline_id === df.guideline_id) || f.finding_title === df.finding_title || (df.evidence_text && f.evidence_text === df.evidence_text))) {
-        imageFindings.push(df);
-      }
+  for (const df of detFindings) {
+    if (!imageFindings.some((f) => (df.guideline_id && f.guideline_id === df.guideline_id) || f.finding_title === df.finding_title || (df.evidence_text && f.evidence_text === df.evidence_text))) {
+      imageFindings.push(df);
     }
+  }
+
+  if (textForAudits.trim()) {
+    const { findings: factFindings } = runFactChecks(textForAudits, activeFacts, { sourceTag: 'image' });
     for (const ff of factFindings) {
       if (!imageFindings.some((f) => (ff.fact_id && f.fact_id === ff.fact_id) || f.finding_title === ff.finding_title)) {
         imageFindings.push(ff);
       }
     }
   }
+
+  // Cross-reference all image findings with active guidelines to record complete evaluated rule statuses
+  const rulesEvaluated = baseEvaluatedRules.map((r) => {
+    const matchingFinding = imageFindings.find((f) => f.guideline_id === r.id);
+    if (matchingFinding) {
+      return {
+        ...r,
+        status: 'FAIL' as const,
+        evidence: matchingFinding.evidence_text || matchingFinding.image_evidence || r.evidence,
+        reason: matchingFinding.explanation,
+      };
+    }
+    return r;
+  });
 
   const aiRun = Boolean(visionRun && visionModelUsed && visionModelUsed.includes('gemini'));
 
@@ -252,6 +272,7 @@ export async function runComplianceReview(
       modality: 'image_only',
       guidelinesEvaluatedCount: activeGuidelines.length,
       factsEvaluatedCount: activeFacts.length,
+      rulesEvaluated,
       scoringBreakdown: scoreBreakdown,
       extracted_ocr_text: extractedOcrText || undefined,
       governance_status,

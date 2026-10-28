@@ -910,51 +910,75 @@ export function inspectLogoPresenceAndIdentity(
 
   const hasLikelyBrandWordmark = hasBrandNameMention || isBrandCandidateValid;
 
-  // Determine presence
-  let presence: LogoPresenceResult = 'UNCERTAIN';
+  // Determine presence using the 5 standardized governance statuses:
+  // A. LOGO_PRESENT: a visible symbol, emblem, logo graphic, or wordmark is detected and verified.
+  // B. LOGO_PRESENT_IDENTITY_UNVERIFIED: a logo is visible but its identity cannot be confirmed (e.g. no reference or unverified brand).
+  // C. LOGO_REFERENCE_MISMATCH: a logo is visible and a real configured reference exists, but there is reliable evidence of a mismatch.
+  // D. LOGO_MISSING: no recognizable logo is visible and the image evidence supports that conclusion.
+  // E. LOGO_UNCERTAIN: image quality, size, occlusion, or ambiguity prevents a reliable decision.
+
+  let presence: LogoPresenceResult = 'LOGO_UNCERTAIN';
   let detectedMark = options?.logoInspection?.detected_mark;
   let location = options?.logoInspection?.location;
   let confidence = options?.logoInspection?.confidence ?? 0.85;
   const matchesReference = options?.logoInspection?.matches_reference;
   const referenceNotes = options?.logoInspection?.reference_notes;
 
-  if (options?.logoInspection?.presence) {
-    presence = options.logoInspection.presence;
+  const rawPres = options?.logoInspection?.presence ? String(options.logoInspection.presence).toUpperCase() : null;
+
+  if (rawPres) {
+    if (rawPres === 'LOGO_REFERENCE_MISMATCH' || (matchesReference === false && primaryLogo)) {
+      presence = 'LOGO_REFERENCE_MISMATCH';
+    } else if (rawPres === 'LOGO_PRESENT' || rawPres === 'PRESENT') {
+      presence = primaryLogo ? 'LOGO_PRESENT' : 'LOGO_PRESENT_IDENTITY_UNVERIFIED';
+    } else if (rawPres === 'LOGO_PRESENT_IDENTITY_UNVERIFIED' || rawPres === 'PRESENT_UNVERIFIED') {
+      presence = 'LOGO_PRESENT_IDENTITY_UNVERIFIED';
+    } else if (rawPres === 'LOGO_MISSING' || rawPres === 'MISSING') {
+      presence = 'LOGO_MISSING';
+    } else {
+      presence = 'LOGO_UNCERTAIN';
+    }
   } else if (options?.hasDetectedLogo === true) {
-    // Logo mark visibly identified (e.g. from vision model or icon detector)
-    if (primaryLogo && hasBrandNameMention) {
-      presence = 'PRESENT';
+    if (primaryLogo && matchesReference === false) {
+      presence = 'LOGO_REFERENCE_MISMATCH';
+    } else if (primaryLogo && hasBrandNameMention) {
+      presence = 'LOGO_PRESENT';
       detectedMark = detectedMark || primaryLogo.asset_name;
     } else {
-      // Mark is visible, but authentic corporate identity is unverified against a reference
-      presence = 'PRESENT_UNVERIFIED';
+      presence = 'LOGO_PRESENT_IDENTITY_UNVERIFIED';
       detectedMark = detectedMark || (isBrandCandidateValid ? brandCandidateLine : 'Visible brand mark / emblem');
       location = location || (isBrandCandidateValid ? 'header / canvas' : 'canvas');
     }
   } else if (hasLikelyBrandWordmark) {
-    if (primaryLogo && hasBrandNameMention) {
-      presence = 'PRESENT';
+    if (primaryLogo && matchesReference === false) {
+      presence = 'LOGO_REFERENCE_MISMATCH';
+    } else if (primaryLogo && hasBrandNameMention) {
+      presence = 'LOGO_PRESENT';
       detectedMark = detectedMark || primaryLogo.asset_name;
     } else {
-      presence = 'PRESENT_UNVERIFIED';
+      presence = 'LOGO_PRESENT_IDENTITY_UNVERIFIED';
       detectedMark = detectedMark || (isBrandCandidateValid ? brandCandidateLine : (hasBrandNameMention ? 'Detected brand wordmark' : 'Detected brand mark / attribution'));
       location = location || 'header / canvas';
     }
   } else if (options?.hasDetectedLogo === false) {
-    // Explicitly verified absence from multimodal visual inspection across entire canvas
     if (imageSummary && (imageSummary.width || 0) >= 200 && (imageSummary.height || 0) >= 200) {
-      presence = 'MISSING';
+      presence = 'LOGO_MISSING';
       confidence = 0.88;
     } else {
-      presence = 'UNCERTAIN';
+      presence = 'LOGO_UNCERTAIN';
       confidence = 0.60;
     }
   } else {
     // In heuristic / local mode without explicit vision detector
     // An image may contain a pure graphical emblem or icon without readable text.
-    // Therefore, do NOT assume MISSING when OCR cannot find a wordmark.
-    presence = 'UNCERTAIN';
+    // Do NOT assume LOGO_MISSING when OCR cannot find a wordmark.
+    presence = 'LOGO_UNCERTAIN';
     confidence = 0.55;
+  }
+
+  // If reference mismatch detected with active reference logo:
+  if (primaryLogo && matchesReference === false && (presence === 'LOGO_PRESENT' || presence === 'LOGO_PRESENT_IDENTITY_UNVERIFIED')) {
+    presence = 'LOGO_REFERENCE_MISMATCH';
   }
 
   // Build details
@@ -964,20 +988,20 @@ export function inspectLogoPresenceAndIdentity(
     location,
     bounding_box: options?.logoInspection?.bounding_box,
     confidence,
-    is_identity_verified: presence === 'PRESENT',
+    is_identity_verified: presence === 'LOGO_PRESENT',
     explanation: detectedMark
       ? `Logo/brand mark detected: ${detectedMark} (${location || 'canvas region'}).`
-      : (presence === 'MISSING' ? 'Canvas visual inspection confirmed absence of brand logo or watermark.' : 'Logo presence evaluation completed.'),
+      : (presence === 'LOGO_MISSING' ? 'Canvas visual inspection confirmed absence of brand logo or watermark.' : 'Logo presence evaluation completed.'),
     matches_reference: matchesReference,
     reference_notes: referenceNotes,
     evidence: detectedMark
       ? `Detected brand mark: "${detectedMark}" (${location || 'canvas region'})`
-      : (presence === 'MISSING' ? 'Visual inspection of canvas confirmed absence of brand logo or watermark.' : 'Logo presence evaluation completed.'),
+      : (presence === 'LOGO_MISSING' ? 'Visual inspection of canvas confirmed absence of brand logo or watermark.' : 'Logo presence evaluation completed.'),
   };
 
   // 1. If logo is MISSING:
   // ONLY create a finding if active brand guidelines actually mandate a logo!
-  if (presence === 'MISSING') {
+  if (presence === 'LOGO_MISSING' || presence === 'MISSING') {
     if (policy.isMandatory) {
       findings.push({
         category: 'logo_and_brand_identity',
@@ -998,7 +1022,7 @@ export function inspectLogoPresenceAndIdentity(
       });
     }
     // If policy.isMandatory is false, do NOT invent a missing logo finding!
-  } else if (presence === 'UNCERTAIN') {
+  } else if (presence === 'LOGO_UNCERTAIN' || presence === 'UNCERTAIN') {
     // If ambiguous and policy mandates logo, report for human verification with calibrated confidence
     if (policy.isMandatory) {
       findings.push({
@@ -1019,27 +1043,28 @@ export function inspectLogoPresenceAndIdentity(
         human_verification_reason: 'Image resolution, occlusion, or background contrast prevents conclusive verification.',
       });
     }
-  } else if (presence === 'PRESENT' || presence === 'PRESENT_UNVERIFIED') {
-    // Logo is visible! Check if there is an actual reference mismatch
-    if (primaryLogo && matchesReference === false) {
-      findings.push({
-        category: 'logo_and_brand_identity',
-        severity: 'high',
-        finding_title: 'Brand Logo Reference Mismatch',
-        explanation: `Detected logo ("${detectedMark || 'Unapproved mark'}") conflicts with approved brand reference "${primaryLogo.asset_name}". ${referenceNotes || 'Using an unauthorized logo variant or third-party symbol compromises brand integrity.'}`,
-        evidence_text: detectedMark || 'Mismatched logo mark on canvas',
-        confidence: Math.max(0.80, confidence),
-        suggested_fix: `Replace the unapproved mark with the official "${primaryLogo.asset_name}" asset from Brand Guidelines.`,
-        source: 'image',
-        verification_status: 'confirmed_violation',
-        target_type: 'logo',
-        target_scope: 'image',
-        image_evidence: detectedMark,
-        asset_id: primaryLogo.id,
-        resolution_status: 'unresolved',
-        needs_human_verification: presence === 'PRESENT_UNVERIFIED',
-      });
-    }
+  } else if (presence === 'LOGO_REFERENCE_MISMATCH' || (primaryLogo && matchesReference === false)) {
+    // A logo is visible, but there is reliable evidence of mismatch with the configured official reference
+    findings.push({
+      category: 'logo_and_brand_identity',
+      severity: 'high',
+      finding_title: 'Brand Logo Reference Mismatch',
+      explanation: `Detected logo ("${detectedMark || 'Unapproved mark'}") conflicts with approved brand reference "${primaryLogo?.asset_name || 'Official Brand Logo'}". ${referenceNotes || 'Using an unauthorized logo variant or third-party symbol compromises brand integrity.'}`,
+      evidence_text: detectedMark || 'Mismatched logo mark on canvas',
+      confidence: Math.max(0.80, confidence),
+      suggested_fix: `Replace the unapproved mark with the official "${primaryLogo?.asset_name || 'Brand Logo'}" asset from Brand Guidelines.`,
+      source: 'image',
+      verification_status: 'confirmed_violation',
+      target_type: 'logo',
+      target_scope: 'image',
+      image_evidence: detectedMark,
+      asset_id: primaryLogo?.id,
+      resolution_status: 'unresolved',
+      needs_human_verification: presence === 'LOGO_PRESENT_IDENTITY_UNVERIFIED',
+    });
+  } else if (presence === 'LOGO_PRESENT' || presence === 'LOGO_PRESENT_IDENTITY_UNVERIFIED' || presence === 'PRESENT' || presence === 'PRESENT_UNVERIFIED') {
+    // Logo is present and either verified or identity is unverified (no reference)
+    // No missing-logo finding is emitted
   }
 
   // 2. Aspect ratio compliance if configured in authorizedAssets

@@ -728,11 +728,11 @@ If there are no violations, return { "extracted_ocr_text": "...", "logo_inspecti
 
     try {
       const candidateModels = [
-        'gemini-3-flash-preview',
+        'gemini-2.0-flash',
+        'gemini-1.5-flash',
         'gemini-3.8-flash',
+        'gemini-3-flash-preview',
         'gemini-flash-latest',
-        'gemini-2.5-flash',
-        'gemini-3.5-flash',
       ];
       let res: Response | null = null;
       let usedModel = candidateModels[0];
@@ -1167,6 +1167,7 @@ If there are no violations, return { "extracted_ocr_text": "...", "logo_inspecti
   // 2. Logo & Brand Identity
   const logoAudit = inspectLogoPresenceAndIdentity(imageSummary, activeAssets, ocrResult.text, {
     guidelines: activeGuidelines,
+    brandName,
   });
   localFindings.push(...logoAudit.findings);
 

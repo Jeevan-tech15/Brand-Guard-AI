@@ -1,4 +1,4 @@
-import { BrandGuideline, ContentType, RuleConfiguration } from '@/lib/types';
+import { BrandGuideline, ContentType, RuleConfiguration, EvaluatedRuleSnapshot } from '@/lib/types';
 import { EngineFinding } from './types';
 
 export function runDeterministicChecks(
@@ -8,16 +8,86 @@ export function runDeterministicChecks(
   options?: {
     targetScope?: 'caption' | 'image';
   }
-): { findings: EngineFinding[]; unsupportedRuleTypes: string[] } {
+): { findings: EngineFinding[]; unsupportedRuleTypes: string[]; evaluatedRules: EvaluatedRuleSnapshot[] } {
   const findings: EngineFinding[] = [];
   const unsupportedRuleTypes: string[] = [];
+  const evaluatedRules: EvaluatedRuleSnapshot[] = [];
   const normalizedContent = content.trim();
   const lowerContent = normalizedContent.toLowerCase();
-  const targetScope: 'caption' | 'image' = options?.targetScope || 'caption';
-  const sourceName = targetScope === 'image' ? 'image' : 'caption';
+  const targetScope: 'caption' | 'image' = options?.targetScope || 'image';
+  const sourceName = 'image';
 
-  for (const rule of guidelines) {
-    if (!rule.is_active) continue;
+  const activeRules = guidelines.filter((g) => g.is_active);
+
+  // -------------------------------------------------------------
+  // 0. Explicit Brand Rule Conflict Detection
+  // Detect direct policy contradictions between saved rules
+  // -------------------------------------------------------------
+  for (let i = 0; i < activeRules.length; i++) {
+    for (let j = i + 1; j < activeRules.length; j++) {
+      const rA = activeRules[i];
+      const rB = activeRules[j];
+      const configA: RuleConfiguration = rA.rule_configuration || {};
+      const configB: RuleConfiguration = rB.rule_configuration || {};
+
+      const prohibitedA = new Set([
+        ...(configA.keywords || []),
+        ...(configA.forbidden_examples || []),
+      ].map((s) => s.toLowerCase().trim()).filter(Boolean));
+
+      const requiredB = new Set([
+        ...(configB.required_phrases || []),
+        ...(configB.allowed_examples || []),
+      ].map((s) => s.toLowerCase().trim()).filter(Boolean));
+
+      const prohibitedB = new Set([
+        ...(configB.keywords || []),
+        ...(configB.forbidden_examples || []),
+      ].map((s) => s.toLowerCase().trim()).filter(Boolean));
+
+      const requiredA = new Set([
+        ...(configA.required_phrases || []),
+        ...(configA.allowed_examples || []),
+      ].map((s) => s.toLowerCase().trim()).filter(Boolean));
+
+      // Check if A prohibits something B mandates or vice-versa
+      let conflictingTerm: string | null = null;
+      for (const term of prohibitedA) {
+        if (requiredB.has(term)) {
+          conflictingTerm = term;
+          break;
+        }
+      }
+      if (!conflictingTerm) {
+        for (const term of prohibitedB) {
+          if (requiredA.has(term)) {
+            conflictingTerm = term;
+            break;
+          }
+        }
+      }
+
+      if (conflictingTerm) {
+        findings.push({
+          category: 'brand_guideline',
+          severity: 'high',
+          finding_title: `Conflicting Brand Rules Detected: "${rA.title}" vs "${rB.title}"`,
+          explanation: `Direct policy contradiction detected between "${rA.title}" and "${rB.title}". One rule prohibits the phrase "${conflictingTerm}" while another mandates its presence. Conflicting rules create ambiguous compliance states and must be reconciled.`,
+          evidence_text: `Contradiction on term: "${conflictingTerm}"`,
+          guideline_id: rA.id,
+          confidence: 1.0,
+          suggested_fix: `Reconcile the conflicting rules in Brand Guidelines so approved marketing copy is not subjected to contradictory requirements.`,
+          source: 'deterministic_rule',
+          verification_status: 'confirmed_violation',
+          target_type: 'text',
+          target_scope: 'image',
+          resolution_status: 'unresolved',
+        });
+      }
+    }
+  }
+
+  for (const rule of activeRules) {
 
     const config: RuleConfiguration =
       rule.rule_configuration ||
@@ -282,18 +352,87 @@ export function runDeterministicChecks(
       }
 
       // -------------------------------------------------------------
-      // 6. Unsupported / Future Rule Types
+      // 6. Generic / Subjective Brand Guidelines
       // -------------------------------------------------------------
       default: {
-        if (!unsupportedRuleTypes.includes(rule.rule_type)) {
-          unsupportedRuleTypes.push(rule.rule_type);
+        // If guideline defines keywords, evaluate presence against keywords
+        const keywords = (config.keywords || config.forbidden_examples || []).map((k) => k.toLowerCase().trim()).filter(Boolean);
+        if (keywords.length > 0) {
+          for (const kw of keywords) {
+            const kwRegex = new RegExp(`\\b${escapeRegExp(kw)}\\b`, 'i');
+            const match = normalizedContent.match(kwRegex);
+            if (match && match[0]) {
+              findings.push({
+                category: 'brand_guideline',
+                severity: rule.severity || 'medium',
+                finding_title: `Brand Guideline Violation: ${rule.title}`,
+                explanation: `Detected term "${match[0]}" violates brand standard "${rule.title}": ${rule.description}`,
+                evidence_text: match[0],
+                guideline_id: rule.id,
+                confidence: 0.95,
+                suggested_fix: `Remove or update "${match[0]}" to comply with brand guideline.`,
+                source: 'deterministic_rule',
+                verification_status: 'confirmed_violation',
+                target_type: 'text',
+                target_scope: 'image',
+                resolution_status: 'unresolved',
+              });
+            }
+          }
         }
         break;
       }
     }
+
+    // Determine honest rule evaluation status: PASS, FAIL, or UNVERIFIABLE
+    const ruleFindings = findings.filter((f) => f.guideline_id === rule.id);
+    if (ruleFindings.length > 0) {
+      evaluatedRules.push({
+        id: rule.id,
+        title: rule.title,
+        rule_type: rule.rule_type,
+        severity: rule.severity,
+        status: 'FAIL',
+        evidence: ruleFindings[0].evidence_text || ruleFindings[0].image_evidence || null,
+        reason: ruleFindings[0].explanation,
+      });
+    } else {
+      // If rule requires visual or textual evidence that is absent from canvas:
+      const isPurelyTextRule = ['prohibited_phrase', 'prohibited_claim', 'prohibited_term', 'forbidden_words'].includes(rule.rule_type);
+      const isDisclaimerRule = ['required_disclaimer', 'required_phrase'].includes(rule.rule_type);
+      
+      if (!normalizedContent && (isDisclaimerRule || rule.description.toLowerCase().includes('must include'))) {
+        evaluatedRules.push({
+          id: rule.id,
+          title: rule.title,
+          rule_type: rule.rule_type,
+          severity: rule.severity,
+          status: 'UNVERIFIABLE',
+          reason: 'Unable to verify from image: creative contains no legible text or mandatory disclosure.',
+        });
+      } else if (isPurelyTextRule) {
+        evaluatedRules.push({
+          id: rule.id,
+          title: rule.title,
+          rule_type: rule.rule_type,
+          severity: rule.severity,
+          status: 'PASS',
+          reason: 'No prohibited language detected in image copy.',
+        });
+      } else {
+        evaluatedRules.push({
+          id: rule.id,
+          title: rule.title,
+          rule_type: rule.rule_type,
+          severity: rule.severity,
+          status: 'PASS',
+          reason: 'Compliant with active guideline standard.',
+        });
+      }
+    }
   }
 
-  return { findings, unsupportedRuleTypes };
+  return { findings, unsupportedRuleTypes, evaluatedRules };
 }
 
 // -------------------------------------------------------------
