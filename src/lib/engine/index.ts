@@ -23,6 +23,7 @@ export async function runComplianceReview(
     assets?: AuthorizedAsset[];
     ocrReferenceText?: string;
     captionText?: string;
+    brandName?: string;
   }
 ): Promise<ComplianceReviewResult> {
   const activeGuidelines = guidelines.filter((g) => g.is_active);
@@ -97,6 +98,7 @@ export async function runComplianceReview(
     facts: activeFacts,
     assets: activeAssets,
     ocrReferenceText: ocrText,
+    brandName: options?.brandName,
   });
 
   const visionRun = visionResult.visionRun;

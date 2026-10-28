@@ -50,6 +50,7 @@ export interface VisionAnalysisParams {
   ocrReferenceText?: string;
   captionText?: string;
   timeoutMs?: number;
+  brandName?: string;
 }
 
 interface LocalOcrResult {
@@ -526,7 +527,9 @@ export async function runVisionAnalysis({
   facts,
   assets,
   ocrReferenceText,
+  captionText,
   timeoutMs = 60000,
+  brandName,
 }: VisionAnalysisParams): Promise<VisionAnalysisResult> {
   const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   const activeGuidelines = guidelines.filter((g) => g.is_active);
@@ -537,9 +540,10 @@ export async function runVisionAnalysis({
   if (ocrReferenceText && ocrReferenceText.trim()) {
     const refText = cleanAndNormalizeOcrText(ocrReferenceText.trim());
     const refFindings: EngineFinding[] = [];
-    refFindings.push(...auditImageTextAndTypography(refText));
+    refFindings.push(...auditImageTextAndTypography(refText, undefined, [brandName].filter(Boolean) as string[]));
     const logoAudit = inspectLogoPresenceAndIdentity(null, activeAssets, refText, {
       guidelines: activeGuidelines,
+      brandName,
     });
     refFindings.push(...logoAudit.findings);
     refFindings.push(...auditImageBrandAndMarketingClaims(refText, activeGuidelines, activeFacts));
@@ -610,6 +614,9 @@ export async function runVisionAnalysis({
 Analyze this uploaded marketing creative image independently for visible defects, typography quality, spelling errors, brand logo presence, policy violations, and compliance issues.
 Evaluate the image thoroughly EVEN IF NO CUSTOM BRAND RULES ARE CONFIGURED.
 
+=== BRAND CONTEXT ===
+Target Brand: ${brandName ? `"${brandName}"` : '(General creative compliance evaluation)'}
+
 === ACTIVE BRAND GUIDELINES ===
 ${activeGuidelines.length > 0 ? activeGuidelines.map((g) => `ID: ${g.id} | Type: ${g.rule_type} | Severity: ${g.severity} | Title: ${g.title} | Rule: ${g.description} | Keywords: ${JSON.stringify(g.rule_configuration.keywords || [])}`).join('\n') : '(No custom brand guidelines configured - evaluate against universal creative quality, advertising standards, typography correctness, and brand identity best practices)'}
 
@@ -620,39 +627,76 @@ ${activeFacts.length > 0 ? activeFacts.map((f) => `ID: ${f.id} | Statement: ${f.
 ${activeAssets.length > 0 ? activeAssets.map((a) => `ID: ${a.id} | Name: ${a.asset_name} | Type: ${a.asset_type} | Metadata: ${JSON.stringify(a.asset_metadata || {})}`).join('\n') : '(No authorized reference logo configured)'}
 
 === MANDATORY AUDIT INSTRUCTIONS ===
-1. Transcribe all text visibly rendered in the creative image into "extracted_ocr_text" accurately (headlines, subheadings, badges, buttons, stickers, body text, packaging labels, and fine print).
+1. Transcribe all text visibly rendered in the creative image into "extracted_ocr_text" accurately (headlines, subheadings, badges, buttons, stickers, body text, packaging labels, fine print, and website/social handles).
 
 2. Rigorously inspect the creative image across these categories:
-   - "spelling_and_grammar": Inspect EVERY single word rendered in the image. Detect ANY spelling mistake, typo, letter transposition (e.g. "soelling" instead of "spelling", "dtect" instead of "detect", "gaurentee" instead of "guarantee", "recieve" instead of "receive", "limted" instead of "limited", "offfer" instead of "offer", "disconut" instead of "discount"), missing letter, duplicated words ("free free", "50% 50%"), broken/cut-off words, or grammar error. Set category to "spelling_and_grammar" with high or medium severity, the exact evidence_text, proposed_replacement, and bounding_box.
+
    - "logo_and_brand_identity":
-     * Inspect the image canvas thoroughly for ANY brand logo, symbol, monogram, icon, badge, crest, seal, or brand wordmark anywhere on the canvas (e.g. monogram letters like "GP", emblem graphics, badges, or brand names in corners, headers, or overlays).
+     * COMPREHENSIVE MULTI-REGION LOGO & BRAND SCAN:
+       Thoroughly inspect ALL regions of the canvas for ANY brand logo, symbol, monogram, icon, badge, crest, seal, or brand wordmark:
+       - All 4 corners: top-left, top-right, bottom-left, bottom-right
+       - Top header banner & bottom footer signature / attribution
+       - Center canvas and featured hero product packaging (e.g. snack wrappers, bottles, cans, boxes, device housings, tags, or apparel chest prints)
+       - Stylized typography wordmarks (e.g. ${brandName ? `"${brandName}", ` : ''}company names, product sub-brands)
+       - Lettermark monograms (e.g. 'GP', 'C', 'NX', 'A', or initials inside geometric shapes)
+       - Abstract symbols, pictorial icons, or mascot graphics
      * Output a dedicated "logo_inspection" object:
        - "presence": EXACTLY one of:
          * "PRESENT": A recognizable logo, monogram, emblem, or brand mark is clearly visible on canvas.
          * "PRESENT_UNVERIFIED": A likely brand mark, monogram, emblem, or wordmark is visible, but cannot be verified against an authorized reference asset.
-         * "MISSING": Full canvas inspection confirmed that NO logo, monogram, emblem, or brand mark is visible.
-         * "UNCERTAIN": Image quality, occlusion, severe crop, blur, or ambiguity prevents a reliable conclusion.
-       - "detected_mark": Detailed description of what mark/emblem was seen (e.g. "Purple 'GP' monogram emblem with 'Digital Work' wordmark in top-left") or "None".
-       - "location": Canvas location (e.g. "top-left", "top-right", "bottom-left", "bottom-right", "center", "none").
+         * "MISSING": Full canvas inspection confirmed that NO logo, monogram, emblem, wordmark, or brand mark is visible ANYWHERE on canvas.
+         * "UNCERTAIN": Image quality, extreme crop, or severe blur prevents a reliable conclusion.
+       - "detected_mark": Exact description of what mark/emblem was seen (e.g. "Red winged circle emblem with 'CONSULTBIN' wordmark in top-left", "Stylized 'NUTRABITE' wordmark on product packaging", "Purple 'GP' monogram emblem in top-left") or "None".
+       - "location": Canvas location (e.g. "top-left", "top-right", "bottom-left", "bottom-right", "center", "product packaging", "none").
        - "bounding_box": Bounding box coordinates { "ymin", "xmin", "ymax", "xmax" } normalized 0 to 1000 if visible, or null.
        - "confidence": Float between 0.0 and 1.0 calibrated to visual evidence clarity.
        - "matches_reference": Boolean if compared against AUTHORIZED BRAND ASSETS, or null if no reference configured.
        - "reference_notes": Brief explanation of reference comparison or verification status.
-     * CRITICAL FINDING RULES FOR LOGOS:
-       - DO NOT report "Missing Brand Logo" if ANY logo, monogram, symbol, emblem, or wordmark is visible (presence is "PRESENT" or "PRESENT_UNVERIFIED").
-       - ONLY report "Missing Brand Logo" if presence is "MISSING" AND the ACTIVE BRAND GUIDELINES explicitly mandate a logo. If no active brand guideline requires a logo, do NOT report a missing logo violation.
-       - If an authorized reference logo is configured in AUTHORIZED BRAND ASSETS and the visible logo clearly conflicts with it, report "Brand Logo Reference Mismatch", NOT "Missing Brand Logo".
-       - If no authorized reference logo is configured, do not invent a mismatch.
-   - "layout_and_design_quality": Detect visible design flaws: text or elements clipped/cut off at canvas borders, low resolution/blur/pixelation, low contrast between text and background making typography illegible, cluttered/overlapping layout, illegible micro-typography disclaimers, or AI generation artifacts (distorted hands/anatomy, warped geometry, smudged text).
-   - "claims_and_consistency": Detect contradictory statements within the image (conflicting discounts like 50% vs 70%, conflicting prices, conflicting durations or specs), suspicious absolute guarantees ("100% cure", "zero risk", "guaranteed profit"), or contradictions with active guidelines and corporate facts.
-   - "abusive_or_harmful_language": Detect profanity, insults, slurs, harassment, threats, or inappropriate copy in visible text.
-   - "copyright_and_ip_risk": Detect commercial stock watermarks (Getty Images, Shutterstock, iStock, Alamy, Adobe Stock, "Sample", "Preview") or recognizable third-party logos/trademarks.
-   - "other_visible_issues": Any other visible flaw affecting quality, trustworthiness, or compliance.
+     * CRITICAL LOGO GOVERNANCE RULES:
+       - If ANY brand logo, emblem, symbol, monogram, badge, or brand name is visible on canvas: presence MUST BE "PRESENT" or "PRESENT_UNVERIFIED". DO NOT set presence to "MISSING"!
+       - NEVER report a "Missing Brand Logo" finding if ANY logo, monogram, symbol, emblem, or brand name is visible!
+       - ONLY report "Missing Brand Logo" if presence is genuinely "MISSING" (zero mark anywhere) AND the ACTIVE BRAND GUIDELINES explicitly mandate a logo.
+       - If no active brand guideline requires a logo, do NOT report a missing logo violation.
+       - If an authorized reference logo is configured and the visible logo clearly belongs to a different brand, report "Brand Logo Reference Mismatch", NOT "Missing Brand Logo".
 
-3. For every genuine violation detected, return:
+   - "spelling_and_grammar":
+     * MICROSCOPIC COPY ACCURACY & MINOR MISTAKE DETECTION:
+       Inspect EVERY single word rendered in the image. You MUST detect ALL mistakes, both major violations AND minor details:
+       - Any minor spelling mistake, letter transposition, or typo (e.g. 'soelling' -> 'spelling', 'dtect' -> 'detect', 'gaurentee' -> 'guarantee', 'limted' -> 'limited', 'offfer'/'offr' -> 'offer', 'disconut' -> 'discount', 'recieve' -> 'receive', 'comitted' -> 'committed', 'delicous' -> 'delicious', 'proteen' -> 'protein', 'calender' -> 'calendar', 'foward' -> 'forward', 'experiance' -> 'experience', 'planing' -> 'planning', 'vaction' -> 'vacation', 'advanture' -> 'adventure', 'memmories' -> 'memories', 'bset' -> 'best', 'sael' -> 'sale', 'frea' -> 'free', 'svae' -> 'save', 'dill' -> 'deal').
+       - Missing spaces between metrics/percentages/currency and words (e.g. '50%OFF' -> '50% OFF', '100%Organic' -> '100% Organic', '24/7Support' -> '24/7 Support', '$50Only' -> '$50 Only').
+       - Accidental double spaces between words (e.g. 'Special  Discount').
+       - Rogue spaces before punctuation (e.g. 'Offer ,' or 'Sale .').
+       - Double period typos ('..' instead of '.' or '...').
+       - Duplicated words/figures (e.g. 'are are', 'the the', 'free free', '50% 50%').
+       - Indefinite article errors (e.g. 'a exclusive' -> 'an exclusive', 'a official' -> 'an official', 'an unique' -> 'a unique', 'an user' -> 'a user').
+       - Common homophone/contraction slips (e.g. 'your invited' -> 'you're invited', 'its time' -> 'it's time', 'their is' -> 'there is').
+       - Hyphenated or awkwardly cut-off words at line breaks.
+
+   - "layout_and_design_quality":
+     * Visual defects, low resolution/pixelation/blur.
+     * Element safety margins: text or logo placed too close to canvas boundaries (<20px / 2% from border) risking being cropped on mobile viewports.
+     * Low contrast or micro-typography making disclaimers or body text illegible.
+     * Screenshot artifacts or mobile UI overlays (e.g. Google Lens icon, battery/clock/wifi status bar, photo gallery buttons).
+     * AI generation artifacts (distorted hands/anatomy, smudged/melted text).
+
+   - "claims_and_consistency":
+     * Floating asterisks (* attached to an offer or headline claim with no corresponding disclaimer footnote at the bottom).
+     * Contradictory statements within the image (e.g. conflicting discounts 50% vs 70%, conflicting prices or durations).
+     * Prohibited absolute guarantees ("100% cure", "zero risk", "guaranteed profit") without mandatory disclaimers.
+
+   - "abusive_or_harmful_language":
+     * Profanity, insults, slurs, harassment, or inappropriate copy.
+
+   - "copyright_and_ip_risk":
+     * Commercial stock watermarks (Getty, Shutterstock, iStock, Alamy, Adobe Stock, "Sample", "Preview") or third-party IP logos.
+
+   - "other_visible_issues":
+     * Any other visible imperfection affecting brand quality, trustworthiness, or compliance.
+
+3. For every violation or minor mistake detected, return:
    - "category": "spelling_and_grammar" | "logo_and_brand_identity" | "abusive_or_harmful_language" | "layout_and_design_quality" | "claims_and_consistency" | "copyright_and_ip_risk" | "other_visible_issues"
-   - "severity": "low" | "medium" | "high" | "critical"
-   - "finding_title": short clear descriptive title
+   - "severity": "low" | "medium" | "high" | "critical" (assign "low" or "medium" for minor mistakes/typos)
+   - "finding_title": short clear descriptive title (e.g. "Spelling Error: 'proteen' instead of 'protein'", "Missing Space: '50%OFF'", "Floating Asterisk Without Footnote")
    - "explanation": evidence-backed explanation citing the specific visual defect or mistake
    - "evidence_text": the exact misspelled word, missing element description, or graphic element
    - "proposed_replacement": the corrected spelling or replacement text (if applicable)
@@ -684,18 +728,18 @@ If there are no violations, return { "extracted_ocr_text": "...", "logo_inspecti
 
     try {
       const candidateModels = [
-        'gemini-3.5-flash',
         'gemini-3-flash-preview',
         'gemini-3.8-flash',
         'gemini-flash-latest',
         'gemini-2.5-flash',
+        'gemini-3.5-flash',
       ];
       let res: Response | null = null;
       let usedModel = candidateModels[0];
 
       for (const m of candidateModels) {
         const perModelController = new AbortController();
-        const perModelTimeout = setTimeout(() => perModelController.abort(), Math.min(45000, timeoutMs));
+        const perModelTimeout = setTimeout(() => perModelController.abort(), Math.min(18000, timeoutMs));
         try {
           console.log(`[Gemini Vision] Attempting model "${m}"...`);
           const url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${apiKey}`;
@@ -929,14 +973,35 @@ If there are no violations, return { "extracted_ocr_text": "...", "logo_inspecti
                 ? `Detected mark: ${markDesc} (${locStr || 'canvas'})`
                 : (validPresence === 'MISSING' ? 'Canvas visual inspection confirmed absence of brand logo or watermark.' : 'Visual inspection completed'),
             };
-          } else {
-            const localInspect = inspectLogoPresenceAndIdentity(imageSummary, activeAssets, extractedOcr, {
-              guidelines: activeGuidelines,
-            });
-            logoInspection = localInspect.details;
           }
 
-          // Supplementary safety checks on extracted text & brand logo
+          // Local OCR and asset brand check to cross-validate Gemini's logo detection
+          const localInspect = inspectLogoPresenceAndIdentity(imageSummary, activeAssets, extractedOcr, {
+            guidelines: activeGuidelines,
+          });
+
+          // Check if brandName or active asset brand name is present in OCR text or detected mark
+          const activeBrandName = brandName || activeAssets.find((a) => a.asset_type === 'logo')?.asset_name?.replace(/official/i, '').replace(/primary/i, '').replace(/logo/i, '').trim();
+          const hasBrandInOcr = Boolean(
+            activeBrandName && activeBrandName.length >= 2 &&
+            extractedOcr.toLowerCase().replace(/[^a-z0-9]/g, '').includes(activeBrandName.toLowerCase().replace(/[^a-z0-9]/g, ''))
+          );
+
+          // If Gemini reported MISSING or UNCERTAIN, but local OCR/inspection detects a brand mark or wordmark:
+          if (
+            (logoInspection.presence === 'MISSING' || logoInspection.presence === 'UNCERTAIN') &&
+            (localInspect.presence === 'PRESENT' || localInspect.presence === 'PRESENT_UNVERIFIED' || hasBrandInOcr)
+          ) {
+            console.log(`[Logo Governance] Cross-validation upgrade: Upgraded logo presence from ${logoInspection.presence} to PRESENT based on detected brand mark/wordmark ("${activeBrandName || localInspect.details.detected_mark}").`);
+            logoInspection.presence = 'PRESENT';
+            logoInspection.detected_mark = logoInspection.detected_mark || activeBrandName || localInspect.details.detected_mark;
+            logoInspection.confidence = Math.max(logoInspection.confidence, 0.88);
+            logoInspection.is_identity_verified = true;
+            logoInspection.explanation = `Brand mark / wordmark "${logoInspection.detected_mark}" confirmed visible on creative canvas.`;
+            logoInspection.evidence = `Visible mark: "${logoInspection.detected_mark}"`;
+          }
+
+          // Supplementary safety checks on extracted text (typos, spacing, floating asterisks, punctuation)
           const localTypoFindings = auditImageTextAndTypography(extractedOcr);
           for (const ltf of localTypoFindings) {
             const alreadyFlagged = mappedFindings.some(
@@ -948,6 +1013,60 @@ If there are no violations, return { "extracted_ocr_text": "...", "logo_inspecti
             if (!alreadyFlagged) {
               mappedFindings.push(ltf);
             }
+          }
+
+          // Supplementary visual & design quality checks (edge margin proximity, screenshot chrome, low contrast)
+          const localVisualFindings = auditImageVisualAndDesignQuality(imageSummary, extractedOcr);
+          for (const lvf of localVisualFindings) {
+            const alreadyFlagged = mappedFindings.some(
+              (mf) =>
+                (mf.category === 'layout_and_design_quality' || mf.category === 'layout_and_design') &&
+                mf.finding_title.toLowerCase() === lvf.finding_title.toLowerCase()
+            );
+            if (!alreadyFlagged) {
+              mappedFindings.push(lvf);
+            }
+          }
+
+          // Supplementary claims & facts consistency checks
+          const localClaimsFindings = auditImageBrandAndMarketingClaims(extractedOcr, activeGuidelines, activeFacts);
+          for (const lcf of localClaimsFindings) {
+            const alreadyFlagged = mappedFindings.some(
+              (mf) =>
+                (mf.category === 'claims_and_consistency' || mf.category === 'brand_guideline') &&
+                ((mf.evidence_text && lcf.evidence_text && mf.evidence_text.toLowerCase() === lcf.evidence_text.toLowerCase()) ||
+                  mf.finding_title.toLowerCase() === lcf.finding_title.toLowerCase())
+            );
+            if (!alreadyFlagged) {
+              mappedFindings.push(lcf);
+            }
+          }
+
+          // Suppress false mismatch findings when creative matches active brand
+          if (activeBrandName) {
+            const normBrand = activeBrandName.toLowerCase().replace(/[^a-z0-9]/g, '');
+            mappedFindings = mappedFindings.filter((f) => {
+              const isMismatchFinding =
+                (f.category === 'logo_and_brand_identity' || f.category === 'logo_and_brand') &&
+                (f.finding_title.toLowerCase().includes('mismatch') ||
+                  f.finding_title.toLowerCase().includes('unauthorized logo') ||
+                  f.finding_title.toLowerCase().includes('unrecognized logo') ||
+                  f.explanation.toLowerCase().includes('does not match the authorized'));
+
+              if (!isMismatchFinding) return true;
+
+              const detectedMark = (logoInspection.detected_mark || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+              const evidence = (f.evidence_text || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+              if (
+                hasBrandInOcr ||
+                (detectedMark && (detectedMark.includes(normBrand) || normBrand.includes(detectedMark))) ||
+                (evidence && (evidence.includes(normBrand) || normBrand.includes(evidence)))
+              ) {
+                console.log(`[Logo Governance] Suppressed false-positive logo mismatch finding for active brand "${activeBrandName}".`);
+                return false;
+              }
+              return true;
+            });
           }
 
           // Explicit Evidence-Based Logo Contradiction Resolution

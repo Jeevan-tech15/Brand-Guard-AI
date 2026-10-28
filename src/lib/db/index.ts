@@ -790,9 +790,31 @@ export async function getAugmentedActiveGuidelinesAndAssets() {
   ]);
 
   const guidelines = [...baseGuidelines];
-  const assets = [...baseAssets];
+  let assets = [...baseAssets];
 
   if (profile) {
+    const brandName = profile.brand_name?.trim();
+    if (brandName) {
+      const isAcme = brandName.toLowerCase().includes('acme');
+      if (!isAcme) {
+        assets = assets.filter((a) => !a.asset_name.toLowerCase().includes('acme enterprise'));
+      }
+    }
+
+    if (profile.official_logo_url) {
+      assets = assets.filter((a) => a.id !== 'profile-official-logo');
+      assets.unshift({
+        id: 'profile-official-logo',
+        asset_name: `${profile.brand_name || 'Brand'} Official Logo`,
+        asset_type: 'logo',
+        file_url: profile.official_logo_url,
+        asset_metadata: { is_primary: true },
+        is_active: true,
+        created_at: profile.updated_at || new Date().toISOString(),
+        updated_at: profile.updated_at || new Date().toISOString(),
+      });
+    }
+
     if (profile.prohibited_phrases && profile.prohibited_phrases.length > 0) {
       guidelines.push({
         id: 'profile-prohibited-phrases',
@@ -886,22 +908,9 @@ export async function getAugmentedActiveGuidelinesAndAssets() {
         });
       }
     }
-
-    if (profile.official_logo_url && !assets.some((a) => a.asset_type === 'logo' && a.is_active)) {
-      assets.unshift({
-        id: 'profile-official-logo',
-        asset_name: `${profile.brand_name || 'Brand'} Official Logo`,
-        asset_type: 'logo',
-        file_url: profile.official_logo_url,
-        asset_metadata: { is_primary: true },
-        is_active: true,
-        created_at: profile.updated_at || new Date().toISOString(),
-        updated_at: profile.updated_at || new Date().toISOString(),
-      });
-    }
   }
 
-  return { guidelines, facts, assets, profile };
+  return { guidelines, facts, assets, profile, brandName: profile?.brand_name || undefined };
 }
 
 export async function createContentReview(
@@ -989,7 +998,7 @@ export async function createContentReview(
 
   // If evaluation requested, evaluate against active guidelines, facts, brand profile, and authorized visual assets
   if (!shouldSkipEvaluation) {
-    const { guidelines, facts, assets } = await getAugmentedActiveGuidelinesAndAssets();
+    const { guidelines, facts, assets, brandName } = await getAugmentedActiveGuidelinesAndAssets();
 
     const evalResult = await runComplianceReview(
       rawCopy,
@@ -999,6 +1008,7 @@ export async function createContentReview(
       {
         imageUrl: payload.image_url,
         assets,
+        brandName,
         ocrReferenceText: options?.ocrReferenceText,
       }
     );
@@ -1248,7 +1258,7 @@ export async function updateContentReviewVersion(
   }
 
   // 3. Rerun compliance evaluation against current active guidelines, facts, brand profile, and authorized visual assets
-  const { guidelines, facts, assets } = await getAugmentedActiveGuidelinesAndAssets();
+  const { guidelines, facts, assets, brandName } = await getAugmentedActiveGuidelinesAndAssets();
 
   const evalResult = await runComplianceReview(
     updatedText,
@@ -1258,6 +1268,7 @@ export async function updateContentReviewVersion(
     {
       imageUrl: updatedImageUrl || undefined,
       assets,
+      brandName,
     }
   );
 

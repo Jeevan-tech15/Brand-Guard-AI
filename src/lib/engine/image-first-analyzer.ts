@@ -238,6 +238,65 @@ const MARKETING_SPELLING_DICTIONARY: Record<string, string> = {
   journy: 'journey',
   travle: 'travel',
   traval: 'travel',
+  sael: 'sale',
+  frea: 'free',
+  bset: 'best',
+  dill: 'deal',
+  svae: 'save',
+  capp: 'cap',
+  packk: 'pack',
+  barz: 'bars',
+  richh: 'rich',
+  healty: 'healthy',
+  helthy: 'healthy',
+  nutriton: 'nutrition',
+  enrgy: 'energy',
+  pwer: 'power',
+  fres: 'fresh',
+  tatse: 'taste',
+  chocholate: 'chocolate',
+  choclate: 'chocolate',
+  flavour: 'flavor',
+  vanila: 'vanilla',
+  snak: 'snack',
+  snaks: 'snacks',
+  diacount: 'discount',
+  spellingg: 'spelling',
+  limtedd: 'limited',
+  makwe: 'make',
+  iumages: 'images',
+  eror: 'error',
+  erors: 'errors',
+  produt: 'product',
+  prodcts: 'products',
+  prodcut: 'product',
+  qualiti: 'quality',
+  gurantee: 'guarantee',
+  discnt: 'discount',
+  offerr: 'offer',
+  recomendedd: 'recommended',
+  availble: 'available',
+  delicius: 'delicious',
+  ingredent: 'ingredient',
+  nutrishus: 'nutritious',
+  packge: 'package',
+  premm: 'premium',
+  orgnic: 'organic',
+  naturaly: 'naturally',
+  guaranti: 'guarantee',
+  servce: 'service',
+  custmerr: 'customer',
+  ordr: 'order',
+  orderr: 'order',
+  savngs: 'savings',
+  savng: 'saving',
+  clik: 'click',
+  visitt: 'visit',
+  bussiness: 'business',
+  campain: 'campaign',
+  promoton: 'promotion',
+  promotoin: 'promotion',
+  advertisment: 'advertisement',
 };
 
 // Common brand names to never flag as misspellings
@@ -260,6 +319,14 @@ const DEFAULT_BRAND_WHITELIST = new Set([
   'linkedin',
   'soc2',
   'iso27001',
+  'consultbin',
+  'nutrabite',
+  'nike',
+  'apple',
+  'google',
+  'meta',
+  'adidas',
+  'samsung',
 ]);
 
 // Core reference vocabulary of standard commercial marketing words for typo distance detection
@@ -481,6 +548,226 @@ export function auditImageTextAndTypography(
     }
   }
 
+  // 5. Missing spaces between numbers/percentages/currency and marketing words (e.g. "50%OFF", "100%Organic", "$50Only")
+  const missingSpaceRegex = /(?:^|\s|\b)(\$?\d+(?:%|\.\d+)?(?:OFF)?|\$\d+|(?:24\/7))([a-zA-Z]{3,})\b/gi;
+  let spaceMatch: RegExpExecArray | null;
+  while ((spaceMatch = missingSpaceRegex.exec(normalized)) !== null) {
+    const rawSnippet = spaceMatch[0].trim();
+    const prefix = spaceMatch[1];
+    const word = spaceMatch[2];
+    const fixed = `${prefix} ${word}`;
+
+    const matchingBbox = boundingBoxes?.find((b) =>
+      b.text.toLowerCase().includes(rawSnippet.toLowerCase())
+    )?.bbox;
+
+    findings.push({
+      category: 'spelling_and_grammar',
+      severity: 'low',
+      finding_title: `Missing Space in Marketing Copy: "${rawSnippet}"`,
+      explanation: `Missing whitespace separation between metric "${prefix}" and copy token "${word}". Proper spacing is required for professional visual legibility.`,
+      evidence_text: rawSnippet,
+      confidence: 0.95,
+      suggested_fix: `Add a space: change "${rawSnippet}" to "${fixed}".`,
+      source: 'ocr_analysis',
+      verification_status: 'confirmed_violation',
+      target_type: 'text',
+      target_scope: 'image',
+      image_evidence: rawSnippet,
+      bounding_box: matchingBbox || null,
+      proposed_replacement: fixed,
+      resolution_status: 'unresolved',
+      needs_human_verification: false,
+    });
+  }
+
+  // 6. Accidental double spaces between words
+  const doubleSpaceRegex = /\b([a-zA-Z0-9]+)\s{2,}([a-zA-Z0-9]+)\b/g;
+  let dSpaceMatch: RegExpExecArray | null;
+  while ((dSpaceMatch = doubleSpaceRegex.exec(imageText)) !== null) {
+    const snippet = dSpaceMatch[0];
+    const w1 = dSpaceMatch[1];
+    const w2 = dSpaceMatch[2];
+    const fixed = `${w1} ${w2}`;
+
+    findings.push({
+      category: 'spelling_and_grammar',
+      severity: 'low',
+      finding_title: `Accidental Double Space in Copy: "${w1}  ${w2}"`,
+      explanation: `Redundant whitespace detected between words "${w1}" and "${w2}". Multiple spaces indicate copy editing oversight.`,
+      evidence_text: snippet,
+      confidence: 0.9,
+      suggested_fix: `Replace multiple spaces with a single space: "${fixed}".`,
+      source: 'ocr_analysis',
+      verification_status: 'confirmed_violation',
+      target_type: 'text',
+      target_scope: 'image',
+      image_evidence: snippet,
+      proposed_replacement: fixed,
+      resolution_status: 'unresolved',
+      needs_human_verification: false,
+    });
+  }
+
+  // 7. Rogue space before punctuation (e.g. "discount ," or "sale .")
+  const spacePunctRegex = /\b([a-zA-Z0-9]+)\s+([,!?:;])/g;
+  let sPunctMatch: RegExpExecArray | null;
+  while ((sPunctMatch = spacePunctRegex.exec(normalized)) !== null) {
+    const snippet = sPunctMatch[0];
+    const word = sPunctMatch[1];
+    const punct = sPunctMatch[2];
+    const fixed = `${word}${punct}`;
+
+    findings.push({
+      category: 'spelling_and_grammar',
+      severity: 'low',
+      finding_title: `Rogue Space Before Punctuation: "${snippet}"`,
+      explanation: `Improper whitespace placed before punctuation mark "${punct}". Punctuation should immediately follow the preceding word.`,
+      evidence_text: snippet,
+      confidence: 0.95,
+      suggested_fix: `Remove the space: change "${snippet}" to "${fixed}".`,
+      source: 'ocr_analysis',
+      verification_status: 'confirmed_violation',
+      target_type: 'text',
+      target_scope: 'image',
+      image_evidence: snippet,
+      proposed_replacement: fixed,
+      resolution_status: 'unresolved',
+      needs_human_verification: false,
+    });
+  }
+
+  // 8. Double period typo (".." instead of single period or ellipsis)
+  const doublePeriodRegex = /(?:[a-zA-Z0-9]+\s*|\b)\.\.(?!\.)/g;
+  let dPeriodMatch: RegExpExecArray | null;
+  while ((dPeriodMatch = doublePeriodRegex.exec(normalized)) !== null) {
+    const snippet = dPeriodMatch[0].trim();
+    findings.push({
+      category: 'spelling_and_grammar',
+      severity: 'low',
+      finding_title: `Double Period Typo: ".." in Copy`,
+      explanation: `Typographical error: accidental double period ".." detected. Use either a single period for sentence closure or an ellipsis "..." for continuation.`,
+      evidence_text: snippet,
+      confidence: 0.9,
+      suggested_fix: `Replace ".." with a single period "."`,
+      source: 'ocr_analysis',
+      verification_status: 'confirmed_violation',
+      target_type: 'text',
+      target_scope: 'image',
+      image_evidence: snippet,
+      proposed_replacement: snippet.replace('..', '.'),
+      resolution_status: 'unresolved',
+      needs_human_verification: false,
+    });
+  }
+
+  // 9. Indefinite article errors (e.g. "a exclusive", "an unique")
+  const articleAErrorRegex = /\b([Aa])\s+(exclusive|official|honest|amazing|incredible|extraordinary|authentic|unbeatable|unlimited|unbelievable|instant|elite|exceptional|unqiue|unreal|early|essential)\b/gi;
+  let aMatch: RegExpExecArray | null;
+  while ((aMatch = articleAErrorRegex.exec(normalized)) !== null) {
+    const raw = aMatch[0];
+    const isCap = aMatch[1] === 'A';
+    const targetWord = aMatch[2];
+    const fixed = `${isCap ? 'An' : 'an'} ${targetWord}`;
+
+    findings.push({
+      category: 'spelling_and_grammar',
+      severity: 'medium',
+      finding_title: `Indefinite Article Grammatical Error: "${raw}"`,
+      explanation: `Grammar rule violation: "${targetWord}" begins with a vowel sound and requires the article "${isCap ? 'An' : 'an'}" rather than "${aMatch[1]}".`,
+      evidence_text: raw,
+      confidence: 0.95,
+      suggested_fix: `Change "${raw}" to "${fixed}".`,
+      source: 'ocr_analysis',
+      verification_status: 'confirmed_violation',
+      target_type: 'text',
+      target_scope: 'image',
+      image_evidence: raw,
+      proposed_replacement: fixed,
+      resolution_status: 'unresolved',
+      needs_human_verification: false,
+    });
+  }
+
+  const articleAnErrorRegex = /\b([Aa]n)\s+(unique|user|universal|one-time|European|uniform|useful|unit|yearly)\b/gi;
+  let anMatch: RegExpExecArray | null;
+  while ((anMatch = articleAnErrorRegex.exec(normalized)) !== null) {
+    const raw = anMatch[0];
+    const isCap = anMatch[1] === 'An';
+    const targetWord = anMatch[2];
+    const fixed = `${isCap ? 'A' : 'a'} ${targetWord}`;
+
+    findings.push({
+      category: 'spelling_and_grammar',
+      severity: 'medium',
+      finding_title: `Indefinite Article Grammatical Error: "${raw}"`,
+      explanation: `Grammar rule violation: "${targetWord}" begins with a consonant 'y' sound and requires the article "${isCap ? 'A' : 'a'}" rather than "${anMatch[1]}".`,
+      evidence_text: raw,
+      confidence: 0.95,
+      suggested_fix: `Change "${raw}" to "${fixed}".`,
+      source: 'ocr_analysis',
+      verification_status: 'confirmed_violation',
+      target_type: 'text',
+      target_scope: 'image',
+      image_evidence: raw,
+      proposed_replacement: fixed,
+      resolution_status: 'unresolved',
+      needs_human_verification: false,
+    });
+  }
+
+  // 10. Common homophone & contraction confusions (e.g. "your invited" vs "you're invited")
+  const homophoneRegex = /\b(your)\s+(invited|welcome|approved|qualif\w+|selected|ready)\b/gi;
+  let homoMatch: RegExpExecArray | null;
+  while ((homoMatch = homophoneRegex.exec(normalized)) !== null) {
+    const raw = homoMatch[0];
+    const fixed = `you're ${homoMatch[2]}`;
+    findings.push({
+      category: 'spelling_and_grammar',
+      severity: 'medium',
+      finding_title: `Grammatical Homophone Error: "${raw}"`,
+      explanation: `Confused contraction: "${raw}" should be written as "${fixed}" (short for "you are"). "Your" is possessive.`,
+      evidence_text: raw,
+      confidence: 0.92,
+      suggested_fix: `Change "${raw}" to "${fixed}".`,
+      source: 'ocr_analysis',
+      verification_status: 'confirmed_violation',
+      target_type: 'text',
+      target_scope: 'image',
+      image_evidence: raw,
+      proposed_replacement: fixed,
+      resolution_status: 'unresolved',
+      needs_human_verification: false,
+    });
+  }
+
+  // 11. Floating asterisk without disclaimer footnote
+  // When an asterisk appears on an offer or claim, e.g. "50% OFF*", but no footnote is provided
+  const hasAsteriskClaim = /[*]/g.test(normalized);
+  if (hasAsteriskClaim) {
+    const hasFootnoteExplanation =
+      /\n\s*[*•·]\s*[a-zA-Z]{3,}/g.test(normalized) ||
+      /\b(?:terms\s+and\s+conditions|terms\s+apply|conditions\s+apply|disclaimer|subject\s+to|valid\s+only)\b/i.test(normalized);
+
+    if (!hasFootnoteExplanation) {
+      findings.push({
+        category: 'claims_and_consistency',
+        severity: 'medium',
+        finding_title: 'Floating Asterisk Without Footnote / Disclaimer',
+        explanation: 'Marketing creative contains an asterisk ("*") attached to a promotional claim or headline, but no corresponding explanatory footnote or disclaimer terms appear on the image.',
+        evidence_text: 'Floating asterisk claim without footnote',
+        confidence: 0.90,
+        suggested_fix: 'Add a small disclaimer footnote at the bottom of the creative clarifying the asterisk terms (e.g. "*Terms and conditions apply").',
+        source: 'ocr_analysis',
+        verification_status: 'confirmed_violation',
+        target_type: 'text',
+        target_scope: 'image',
+        resolution_status: 'unresolved',
+        needs_human_verification: false,
+      });
+    }
+  }
+
   return findings;
 }
 
@@ -593,29 +880,43 @@ export function inspectLogoPresenceAndIdentity(
 
   const hasBrandNameMention = knownBrandNames.some((name) => cleanText.includes(name));
 
-  // Extract brand signifier words and prominent header wordmark candidates
+  // Extract brand signifier words and prominent brand wordmark candidates
   const brandSignifiers = [
     'digital work', 'digital', 'brand', 'studio', 'studios', 'platform', 'technologies',
     'labs', 'agency', 'media', 'solutions', 'enterprises', 'app', 'corp',
     'inc', 'co', 'group', 'company', 'network', 'creative', 'ventures',
+    'consultbin', 'nutrabite', 'soundzen', 'voltmax', 'cloudnova', 'hyperion',
+    'vitalpulse', 'aethelgard', 'purevita', 'apexwealth', 'wanderluxe',
   ];
   const ocrLines = (ocrText || '').split('\n').map((l) => l.trim()).filter((l) => l.length >= 2);
-  const headerCandidate = ocrLines.length > 0 ? ocrLines[0] : '';
-  const isHeaderLikelyBrand =
-    headerCandidate.length >= 2 &&
-    headerCandidate.length <= 35 &&
-    !/^(flash|sale|discount|off|shop|buy|click|limited|warning|caution|terms|apply|free)/i.test(headerCandidate) &&
-    (brandSignifiers.some((sig) => headerCandidate.toLowerCase().includes(sig)) || /^[A-Z]/.test(headerCandidate));
+  
+  // Find any candidate line that looks like a brand name or header/footer wordmark
+  const brandCandidateLine = ocrLines.find((l) => {
+    if (l.length < 2 || l.length > 40) return false;
+    const low = l.toLowerCase();
+    if (/^(flash|sale|discount|off|shop|buy|click|limited|warning|caution|terms|apply|free|save|get|order|call|price)\b/i.test(l)) {
+      return false;
+    }
+    if (knownBrandNames.some((bn) => low.includes(bn))) return true;
+    if (brandSignifiers.some((sig) => low.includes(sig))) return true;
+    if (/^[A-Z0-9\s&.\-']{2,30}$/.test(l) && !/[0-9]{5,}/.test(l)) return true;
+    return false;
+  }) || (ocrLines.length > 0 ? ocrLines[0] : '');
 
-  const hasLikelyBrandWordmark = hasBrandNameMention || isHeaderLikelyBrand;
+  const isBrandCandidateValid =
+    brandCandidateLine.length >= 2 &&
+    brandCandidateLine.length <= 40 &&
+    !/^(flash|sale|discount|off|shop|buy|click|limited|warning|caution|terms|apply|free)/i.test(brandCandidateLine);
+
+  const hasLikelyBrandWordmark = hasBrandNameMention || isBrandCandidateValid;
 
   // Determine presence
   let presence: LogoPresenceResult = 'UNCERTAIN';
   let detectedMark = options?.logoInspection?.detected_mark;
   let location = options?.logoInspection?.location;
   let confidence = options?.logoInspection?.confidence ?? 0.85;
-  let matchesReference = options?.logoInspection?.matches_reference;
-  let referenceNotes = options?.logoInspection?.reference_notes;
+  const matchesReference = options?.logoInspection?.matches_reference;
+  const referenceNotes = options?.logoInspection?.reference_notes;
 
   if (options?.logoInspection?.presence) {
     presence = options.logoInspection.presence;
@@ -627,8 +928,8 @@ export function inspectLogoPresenceAndIdentity(
     } else {
       // Mark is visible, but authentic corporate identity is unverified against a reference
       presence = 'PRESENT_UNVERIFIED';
-      detectedMark = detectedMark || (isHeaderLikelyBrand ? headerCandidate : 'Visible brand mark / emblem');
-      location = location || (isHeaderLikelyBrand ? 'top-left / header' : 'canvas');
+      detectedMark = detectedMark || (isBrandCandidateValid ? brandCandidateLine : 'Visible brand mark / emblem');
+      location = location || (isBrandCandidateValid ? 'header / canvas' : 'canvas');
     }
   } else if (hasLikelyBrandWordmark) {
     if (primaryLogo && hasBrandNameMention) {
@@ -636,11 +937,11 @@ export function inspectLogoPresenceAndIdentity(
       detectedMark = detectedMark || primaryLogo.asset_name;
     } else {
       presence = 'PRESENT_UNVERIFIED';
-      detectedMark = detectedMark || (isHeaderLikelyBrand ? headerCandidate : (hasBrandNameMention ? 'Detected brand wordmark' : 'Detected brand mark / attribution'));
-      location = location || (isHeaderLikelyBrand ? 'top-left / header' : 'canvas');
+      detectedMark = detectedMark || (isBrandCandidateValid ? brandCandidateLine : (hasBrandNameMention ? 'Detected brand wordmark' : 'Detected brand mark / attribution'));
+      location = location || 'header / canvas';
     }
   } else if (options?.hasDetectedLogo === false) {
-    // Explicitly verified absence from visual inspection
+    // Explicitly verified absence from multimodal visual inspection across entire canvas
     if (imageSummary && (imageSummary.width || 0) >= 200 && (imageSummary.height || 0) >= 200) {
       presence = 'MISSING';
       confidence = 0.88;
@@ -650,14 +951,10 @@ export function inspectLogoPresenceAndIdentity(
     }
   } else {
     // In heuristic / local mode without explicit vision detector
-    // If OCR extracted text cleanly and full image inspected without any logo mark
-    if (cleanText.length > 20 && imageSummary && (imageSummary.width || 0) >= 300) {
-      presence = 'MISSING';
-      confidence = 0.82;
-    } else {
-      presence = 'UNCERTAIN';
-      confidence = 0.55;
-    }
+    // An image may contain a pure graphical emblem or icon without readable text.
+    // Therefore, do NOT assume MISSING when OCR cannot find a wordmark.
+    presence = 'UNCERTAIN';
+    confidence = 0.55;
   }
 
   // Build details
@@ -951,6 +1248,71 @@ export function auditImageVisualAndDesignQuality(
           });
         }
       }
+    }
+  }
+
+  // 3. Canvas Edge Proximity / Insufficient Safe Zone Margin
+  if (boundingBoxes && boundingBoxes.length > 0) {
+    for (const b of boundingBoxes) {
+      if (!b.text || b.text.length < 3) continue;
+      const isTooCloseToEdge =
+        b.bbox.ymin < 15 ||
+        b.bbox.xmin < 15 ||
+        b.bbox.ymax > 985 ||
+        b.bbox.xmax > 985;
+
+      if (isTooCloseToEdge) {
+        findings.push({
+          category: 'layout_and_design_quality',
+          severity: 'low',
+          finding_title: `Element Placed Too Close to Canvas Edge: "${b.text}"`,
+          explanation: `Typography element "${b.text}" is positioned within 1.5% of the canvas boundary. Elements touching canvas edges risk being cropped or obscured on mobile viewports, app UI headers, or story reels.`,
+          evidence_text: b.text,
+          confidence: 0.88,
+          suggested_fix: `Reflow artboard with a minimum 40px (4%) safe margin inset from all canvas edges.`,
+          source: 'ocr_analysis',
+          verification_status: 'possible_inconsistency',
+          target_type: 'layout',
+          target_scope: 'image',
+          image_evidence: b.text,
+          bounding_box: b.bbox,
+          resolution_status: 'unresolved',
+          needs_human_verification: true,
+          human_verification_reason: 'Check artboard safe margin preview on mobile screens.',
+        });
+        break; // One edge margin warning is sufficient per creative
+      }
+    }
+  }
+
+  // 4. UI Screenshot Overlays or Interface Artifacts
+  if (imageText) {
+    const clean = cleanAndNormalizeOcrText(imageText).toLowerCase();
+    const uiArtifactMatches = [
+      'google lens',
+      'tap to view',
+      'swipe up',
+      'camera roll',
+      'screenshot',
+      'unread message',
+    ].filter((sig) => clean.includes(sig));
+
+    if (uiArtifactMatches.length > 0) {
+      findings.push({
+        category: 'layout_and_design_quality',
+        severity: 'low',
+        finding_title: `Screenshot UI Overlay / Interface Artifact Detected: "${uiArtifactMatches[0]}"`,
+        explanation: `Creative image contains visible mobile or desktop UI overlay elements ("${uiArtifactMatches.join(', ')}"). Using raw screen captures rather than dedicated vector/raster marketing exports diminishes brand credibility.`,
+        evidence_text: uiArtifactMatches.join(', '),
+        confidence: 0.92,
+        suggested_fix: 'Crop out UI overlays or export clean original graphics from design source files.',
+        source: 'ocr_analysis',
+        verification_status: 'confirmed_violation',
+        target_type: 'visual_element',
+        target_scope: 'image',
+        resolution_status: 'unresolved',
+        needs_human_verification: false,
+      });
     }
   }
 

@@ -1021,8 +1021,10 @@ export function ReviewDetailsView({ id }: ReviewDetailsViewProps) {
                   <div className="flex items-center gap-1.5 text-[10px] bg-white p-1.5 rounded border border-gray-200">
                     <Cpu className="w-3 h-3 text-blue-600 shrink-0" />
                     <span className="text-gray-600 truncate">Vision Provider:</span>
-                    <span className="font-semibold text-gray-700 ml-auto truncate max-w-[90px]" title={review.evaluation_metadata?.visionModelUsed || review.evaluation_metadata?.ocrProvider || 'Local OCR Engine'}>
-                      {review.evaluation_metadata?.aiRun ? 'Gemini 2.5' : 'Local Engine'}
+                    <span className="font-semibold text-gray-700 ml-auto truncate max-w-[105px]" title={review.evaluation_metadata?.visionModelUsed || review.evaluation_metadata?.ocrProvider || 'Local OCR Engine'}>
+                      {review.evaluation_metadata?.aiRun
+                        ? (review.evaluation_metadata?.visionModelUsed?.replace(/^gemini-/, 'Gemini ') || 'Gemini Vision')
+                        : 'Local Engine'}
                     </span>
                   </div>
 
